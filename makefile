@@ -15,11 +15,11 @@ CFLAGS := -Wall -Wextra -O3 -flto -march=native -MMD -MP -DBUILD=\"$(VERSION)\"
 LDFLAGS := -flto -lm -lpthread
 
 # Windows cross-compile settings
-WIN_CC := clang --target=x86_64-w64-mingw32 -fusemake clean && make -j-ld=lld
+WIN_CC := clang --target=x86_64-w64-mingw32 -fuse-ld=lld
 WIN_TARGET := ./cwtch.exe
 WIN_BUILD_DIR := build-win
 WIN_CFLAGS := -Wall -Wextra -O3 -flto -march=native -MMD -MP -DBUILD=\"$(VERSION)\"
-WIN_LDFLAGS := -flto
+WIN_LDFLAGS := -flto -lm -lpthread -static -Wl,--stack,8388608 
 
 # Debug settings (for valgrind/gdb)
 DEBUG_CFLAGS := -Wall -Wextra -O1 -g -DBUILD=\"$(VERSION)\"
