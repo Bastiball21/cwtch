@@ -27,7 +27,7 @@ _Thread_local TT unpacked_tt;
 
 int new_tt(size_t megabytes) {
   if (megabytes < 1) megabytes = 1;
-  if (megabytes > 32768) megabytes = 32768;
+  if (megabytes > 262144) megabytes = 262144;
 
   if (tt) {
     free(tt);
