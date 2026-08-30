@@ -18,8 +18,9 @@ Cwtch is a UCI chess engine written in C. As a command line program it needs a c
 Commands can be given on the command line, for example: ```./cwtch ucinewgame "position startpos" b "go depth 10"```.
 
 ## UCI options
-
-- option name Hash type spin default 256 min 1 max 1024
+- option name Hash type spin default 256 min 1 max 262144
+- option name Threads type spin default 1 min 1 max 256
+- option name UCI_Chess960 type check default false
 - option name LoadNet type string default
 
 ## Cwtch's Net
