@@ -99,8 +99,10 @@ int qsearch(const int ply, int alpha, const int beta) {
   int played = 0;
   int quiet_evasions = 0;
 
-  node->cont2 = NULL;
-  node->cont4 = NULL;
+  // razoring calls this on a node that carries on searching, so these must stay
+  // what search() set them to
+  node->cont2 = ply >= 1 ? nodes[ply-1].cont_entry : NULL;
+  node->cont4 = ply >= 3 ? nodes[ply-3].cont_entry : NULL;
 
   lazy_update_accs(node);  // children update from this node's accumulators
 
