@@ -1,8 +1,13 @@
+#include <string.h>
 #include "hh.h"
 
-static uint64_t hashes[MAX_HH];
-static int game_ply;
-static int root_ply;
+static _Thread_local uint64_t hashes[MAX_HH];
+static _Thread_local int game_ply;
+static _Thread_local int root_ply;
+
+static uint64_t shared_hashes[MAX_HH];
+static int shared_game_ply;
+static int shared_root_ply;
 
 void hh_reset(void) {
   game_ply = 0;
@@ -16,6 +21,17 @@ void hh_push(uint64_t hash) {
 
 void hh_set_root(void) {
   root_ply = game_ply - 1;
+  shared_game_ply = game_ply;
+  shared_root_ply = root_ply;
+  if (game_ply > 0)
+    memcpy(shared_hashes, hashes, (size_t)game_ply * sizeof(uint64_t));
+}
+
+void hh_init_thread(void) {
+  game_ply = shared_game_ply;
+  root_ply = shared_root_ply;
+  if (shared_game_ply > 0)
+    memcpy(hashes, shared_hashes, (size_t)shared_game_ply * sizeof(uint64_t));
 }
 
 void hh_store(int search_ply, uint64_t hash) {

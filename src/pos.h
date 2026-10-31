@@ -31,11 +31,11 @@ typedef struct {
 
 } Position;
 
-inline void pos_copy(const Position *from_pos, Position *to_pos) {
+static inline void pos_copy(const Position *from_pos, Position *to_pos) {
   *to_pos = *from_pos;
 }
 
-inline int is_pawn_endgame(const Position *pos) {
+static inline int is_pawn_endgame(const Position *pos) {
   const uint64_t *const a = pos->all;
   return pos->occupied == (a[WKING] | a[WPAWN] | a[BKING] | a[BPAWN]);
 }

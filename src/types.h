@@ -6,15 +6,22 @@
 
 // BUILD is injected by the makefile from VERSION (-DBUILD=...).
 
-#define NET_H1_SIZE 512
+#ifndef NET_H1_SIZE
+#define NET_H1_SIZE 1536
+#endif
 #define NET_I_SIZE 768   // inputs per king bucket
-#define NET_I_BUCKETS 4  // king buckets per perspective, layout in net.c
+#ifndef NET_I_BUCKETS
+#define NET_I_BUCKETS 16  // king buckets per perspective, layout in net.c
+#endif
 #define NET_MIRRORED 1   // mirror board horizontally when king on files e-h
 #define NET_O_BUCKETS 8  // output buckets by piece count
 #define NET_QA 255
 #define NET_QB 64
 #define NET_QAB (NET_QA * NET_QB)
 #define NET_SCALE 400
+
+_Static_assert(NET_H1_SIZE > 0 && (NET_H1_SIZE % 32) == 0 && NET_H1_SIZE <= 4096,
+               "NET_H1_SIZE must be a multiple of 32 and <= 4096");
 
 // Path to the weights file embedded via INCBIN in net.c. Hardwired; to build
 // against a different net, edit this line.
@@ -42,19 +49,19 @@ enum {
 #define MATE 32000
 #define MATEISH 31000
 
-inline int piece_index(const int piece, const int colour) {
+static inline int piece_index(const int piece, const int colour) {
   return piece + colour * 6;
 }
 
-inline int colour_index(const int colour) {
+static inline int colour_index(const int colour) {
   return colour * 6;
 }
 
-inline int piece_colour(const int index) {
+static inline int piece_colour(const int index) {
   return index / 6;
 }
 
-inline int piece_type(const int index) {
+static inline int piece_type(const int index) {
   return index % 6;
 }
 

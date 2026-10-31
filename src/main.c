@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>
 #include "uci.h"
 #include "bitboard.h"
 #include "nodes.h"
@@ -11,6 +12,7 @@
 #include "see.h"
 #include "input.h"
 #include "position.h"
+#include "datagen.h"
 
 #define INPUT_BUFFER_SIZE 8192
 
@@ -27,13 +29,15 @@ int main(int argc, char *argv[]) {
 
   position(&nodes[0], "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR", "w", "KQkq", "-", 0, 0, NULL);
 
-  // If command-line arguments provided, execute them and exit
+  // If command-line arguments provided, execute them as a single command and exit
   if (argc > 1) {
+    char cmd[INPUT_BUFFER_SIZE];
+    cmd[0] = '\0';
     for (int i = 1; i < argc; i++) {
-      if (!uci_exec(argv[i])) {
-        break;
-      }
+      strcat(cmd, argv[i]);
+      if (i < argc - 1) strcat(cmd, " ");
     }
+    uci_exec(cmd);
     return 0;
   }
 
@@ -49,5 +53,4 @@ int main(int argc, char *argv[]) {
   }
 
   _Exit(0);
-
 }

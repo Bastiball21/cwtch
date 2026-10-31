@@ -124,7 +124,7 @@ void make_move(Node *node, const move_t move) {
       all[rook_piece] ^= (1ULL << r_to);
       colour[stm] ^= ((1ULL << k_to) | (1ULL << r_to));
 
-      hash ^= zob_pieces[king_piece][from] ^ zob_pieces[king_piece][k_to] 
+      hash ^= zob_pieces[king_piece][k_to] 
             ^ zob_pieces[rook_piece][to] ^ zob_pieces[rook_piece][r_to];
 
       node->net_deferred.type = NET_OP_CASTLE;
@@ -187,6 +187,13 @@ void make_move(Node *node, const move_t move) {
 
 }
 
+void apply_move(Node *node, const move_t move) {
+  make_move(node, move);
+  int16_t scratch[2][NET_H1_SIZE];
+  memcpy(scratch, node->accs, sizeof scratch);
+  update_accs(node, scratch);
+}
+
 void play_move(Node *node, char *uci_move) {
 
   char buf[6];
@@ -204,11 +211,7 @@ void play_move(Node *node, char *uci_move) {
 
     format_move(move, buf);
     if (!strcmp(uci_move, buf)) {
-      make_move(node, move);
-      // scratch source so update_accs() src/dest don't alias
-      int16_t scratch[2][NET_H1_SIZE];
-      memcpy(scratch, node->accs, sizeof scratch);
-      update_accs(node, scratch);
+      apply_move(node, move);
       return;
     }
   }

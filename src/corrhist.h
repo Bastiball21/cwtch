@@ -14,7 +14,7 @@
 
 extern int16_t pawn_corr[2][CORR_SIZE];
 
-inline void clear_corrhist(void) {
+static inline void clear_corrhist(void) {
   memset(pawn_corr, 0, sizeof(pawn_corr));
 }
 

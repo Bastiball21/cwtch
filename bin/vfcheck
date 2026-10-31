@@ -8,53 +8,126 @@ fi
 
 DIR="$1"
 FILTER="${2:-}"
-BULLET="../bullet/target/release/bullet-utils"
 
-if [ ! -x "$BULLET" ]; then
-  echo "error: bullet-utils not found at $BULLET"
+if [ ! -d "$DIR" ]; then
+  echo "error: directory $DIR not found"
   exit 1
 fi
 
-TOTAL_GAMES=0
 TOTAL_POSITIONS=0
 TOTAL_FILES=0
 FAILED=0
 
-for f in "$DIR"/*.vf; do
+for f in "$DIR"/*.vf "$DIR"/*.vf.zst; do
   [ -f "$f" ] || continue
   if [ -n "$FILTER" ] && [[ "$(basename "$f")" != *"$FILTER"* ]]; then
     continue
   fi
   TOTAL_FILES=$((TOTAL_FILES + 1))
 
-  # check file ends with 4-byte zero terminator (end-of-game marker)
-  TAIL=$(tail -c 4 "$f" | od -An -tx1 | tr -d ' \n')
-  if [ "$TAIL" != "00000000" ]; then
-    echo "FAIL $f (truncated: missing end-of-game marker)"
-    FAILED=$((FAILED + 1))
-    continue
-  fi
+  # Run embedded Python validator on this file
+  OUTPUT=$(python3 - "$f" <<'PYEOF'
+import sys
+import struct
+import subprocess
 
-  OUTPUT=$("$BULLET" viribinpack count "$f" 2>&1) || {
-    echo "FAIL $f"
-    FAILED=$((FAILED + 1))
-    continue
-  }
-  GAMES=$(echo "$OUTPUT" | grep "^Games" | awk '{print $3}')
-  POSITIONS=$(echo "$OUTPUT" | grep "^Positions" | awk '{print $3}')
-  BPP=$(echo "$OUTPUT" | grep "^Bytes" | awk '{print $5}')
-  echo "ok   $f  games=$GAMES positions=$POSITIONS bpp=$BPP"
-  TOTAL_GAMES=$((TOTAL_GAMES + GAMES))
-  TOTAL_POSITIONS=$((TOTAL_POSITIONS + POSITIONS))
+filename = sys.argv[1]
+HEADER_SIZE = 35
+BOARD_SIZE = 32
+SENTINEL_SCORE = -32768
+
+try:
+    if filename.endswith('.zst'):
+        try:
+            import zstandard
+            with open(filename, 'rb') as f:
+                dctx = zstandard.ZstdDecompressor()
+                with dctx.stream_reader(f) as reader:
+                    data = reader.read()
+        except ImportError:
+            data = subprocess.check_output(['zstd', '-dc', filename])
+    else:
+        with open(filename, 'rb') as f:
+            data = f.read()
+except Exception as e:
+    print(f"FAIL {filename} (cannot read: {e})")
+    sys.exit(1)
+
+def popcount(x):
+    return bin(x).count('1')
+
+file_size = len(data)
+offset = 0
+games = 0
+scored_positions = 0
+total_plies = 0
+
+while offset < file_size:
+    if offset + HEADER_SIZE > file_size:
+        print(f"FAIL {filename} (truncated game header at offset {offset})")
+        sys.exit(1)
+
+    board_bytes = data[offset:offset+BOARD_SIZE]
+    wdl = data[offset+32]
+    count = struct.unpack_from('<H', data, offset+33)[0]
+    offset += HEADER_SIZE
+
+    occ = struct.unpack_from('<Q', board_bytes, 0)[0]
+    piece_bits = popcount(occ)
+    if piece_bits < 2 or piece_bits > 32:
+        print(f"FAIL {filename} (game {games}: occupancy has {piece_bits} pieces)")
+        sys.exit(1)
+
+    nibbles = board_bytes[8:24]
+    pieces = 0
+    for j in range(piece_bits):
+        byte = nibbles[j // 2]
+        nibble = (byte >> (4 * (j % 2))) & 0x0F
+        if (nibble & 0x07) > 6:
+            print(f"FAIL {filename} (game {games}: invalid piece type {nibble & 0x07})")
+            sys.exit(1)
+        pieces += 1
+
+    if wdl not in (0, 1, 2):
+        print(f"FAIL {filename} (game {games}: invalid wdl {wdl})")
+        sys.exit(1)
+
+    rec_bytes = count * 4
+    if offset + rec_bytes > file_size:
+        print(f"FAIL {filename} (game {games}: truncated move records, expected {rec_bytes} bytes)")
+        sys.exit(1)
+
+    for j in range(count):
+        move, score = struct.unpack_from('<Hh', data, offset + j * 4)
+        total_plies += 1
+        if score != SENTINEL_SCORE:
+            scored_positions += 1
+
+    offset += rec_bytes
+    games += 1
+
+bpp = (file_size / scored_positions) if scored_positions > 0 else 0.0
+print(f"OK {filename} positions={scored_positions} games={games} plies={total_plies} bpp={bpp:.1f}")
+sys.exit(0)
+PYEOF
+) || {
+  echo "FAIL $f"
+  FAILED=$((FAILED + 1))
+  continue
+}
+
+  echo "$OUTPUT"
+  POS=$(echo "$OUTPUT" | awk '{print $3}' | cut -d= -f2)
+  TOTAL_POSITIONS=$((TOTAL_POSITIONS + POS))
 done
 
 if [ "$TOTAL_FILES" -eq 0 ]; then
-  echo "no .vf files found in $DIR"
+  echo "no .vf or .vf.zst files found in $DIR"
   exit 1
 fi
 
 echo ""
-echo "$TOTAL_FILES files, $TOTAL_GAMES games, $TOTAL_POSITIONS positions, $FAILED failed"
+echo "$TOTAL_FILES files, $TOTAL_POSITIONS positions, $FAILED failed"
 
 if [ "$FAILED" -gt 0 ]; then
   exit 1

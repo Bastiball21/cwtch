@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "=== 1. Checking compile-time NET_H1_SIZE support (1024, 1536, 1792) ==="
+for h in 1024 1536 1792; do
+  clang -O2 -DNET_H1_SIZE=$h -DBUILD=\"6.5\" -fsyntax-only src/net.c
+  echo "  NET_H1_SIZE=$h: syntax & _Static_assert OK"
+done
+
+echo "=== 2. Building single Universal x86-64 binary (-march=x86-64) ==="
+TMP_DIR=$(mktemp -d /tmp/cwtch_verify.XXXXXX)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+clang -O3 -flto -march=x86-64 -funroll-loops -fno-math-errno -DBUILD=\"6.5\" src/*.c -o "$TMP_DIR/cwtch_universal" -lm -lpthread -lzstd
+
+echo "  Auto-detected SIMD on this CPU: $("$TMP_DIR/cwtch_universal" net | grep "^simd:")"
+
+BENCH_DEPTH="${1:-8}"
+REF_NODES=""
+
+echo "=== 3. Testing all 4 runtime-dispatched SIMD paths in the universal binary ==="
+for variant in scalar avx2 avx512bw avx512_vnni; do
+  simd_line=$(CWTCH_SIMD="$variant" "$TMP_DIR/cwtch_universal" net | grep "^simd:")
+  CWTCH_SIMD="$variant" "$TMP_DIR/cwtch_universal" et > "$TMP_DIR/${variant}.et"
+  et_sum=$(tail -n 1 "$TMP_DIR/${variant}.et")
+  bench_out=$(CWTCH_SIMD="$variant" "$TMP_DIR/cwtch_universal" "bench $BENCH_DEPTH" | grep "^nodes ")
+  nodes=$(awk '{print $2}' <<< "$bench_out")
+  nps=$(awk '{print $6}' <<< "$bench_out")
+  echo "  [CWTCH_SIMD=$variant] $simd_line | et: $et_sum | bench $BENCH_DEPTH: nodes=$nodes nps=$nps"
+
+  if [ -z "$REF_NODES" ]; then
+    REF_NODES="$nodes"
+  else
+    diff -u "$TMP_DIR/scalar.et" "$TMP_DIR/${variant}.et"
+    if [ "$nodes" != "$REF_NODES" ]; then
+      echo "FAIL: node count mismatch ($variant=$nodes vs scalar=$REF_NODES)"
+      exit 1
+    fi
+  fi
+done
+
+echo "PASS: Universal binary runs all 4 SIMD paths (scalar, avx2, avx512bw, avx512_vnni) bit-identically!"

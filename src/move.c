@@ -16,10 +16,10 @@ int format_move(const move_t move, char *const buf) {
   // If it's a castle and we are NOT in 960 mode, visually fake 
   // the destination square to standard UCI notation for the GUI.
   if ((move & MOVE_FLAG_CASTLE) && !is_chess960) {
-    if (to == 7) to = 6;        // H1 -> G1 (White Kingside)
-    else if (to == 0) to = 2;   // A1 -> C1 (White Queenside)
-    else if (to == 63) to = 62; // H8 -> G8 (Black Kingside)
-    else if (to == 56) to = 58; // A8 -> C8 (Black Queenside)
+    if (from == E1 && to == H1) to = G1;      // H1 -> G1 (White Kingside)
+    else if (from == E1 && to == A1) to = C1; // A1 -> C1 (White Queenside)
+    else if (from == E8 && to == H8) to = G8; // H8 -> G8 (Black Kingside)
+    else if (from == E8 && to == A8) to = C8; // A8 -> C8 (Black Queenside)
   }
   // ==========================================
 

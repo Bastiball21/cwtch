@@ -14,20 +14,20 @@ extern int16_t piece_to_history[12][64];
 extern int16_t cont_history[12][64][12][64];  // [prev piece][prev to][piece][to]
 extern int16_t capture_history[12][64][6];  // [piece][to][captured type] (ep/promo capture -> pawn)
 
-inline void clear_piece_to_history(void) {
+static inline void clear_piece_to_history(void) {
   memset(piece_to_history, 0, sizeof(piece_to_history));
 }
 
-inline void clear_cont_history(void) {
+static inline void clear_cont_history(void) {
   memset(cont_history, 0, sizeof(cont_history));
 }
 
-inline void clear_capture_history(void) {
+static inline void clear_capture_history(void) {
   memset(capture_history, 0, sizeof(capture_history));
 }
 
 extern move_t counter_moves[12][64];
-inline void clear_counter_moves(void) {
+static inline void clear_counter_moves(void) {
   memset(counter_moves, 0, sizeof(counter_moves));
 }
 

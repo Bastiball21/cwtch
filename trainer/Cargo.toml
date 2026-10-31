@@ -1,0 +1,15 @@
+[package]
+name = "trainer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+viriformat = { git = "https://github.com/cosmobobak/viriformat" }
+bullet_lib = { path = "../../bullet/crates/bullet_lib", features = ["cuda"] }
+bullet-trainer = { path = "../../bullet/crates/trainer" }
+sfbinpack = "0.6.5"
+zstd = "0.13"
+rand = "0.8"
+
+[patch.crates-io]
+sfbinpack = { path = "/home/sebby/sfbinpack-patched" }

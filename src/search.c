@@ -22,7 +22,19 @@
 #include "see.h"
 #include <stdatomic.h>
 
-_Thread_local int search_local_node_batch = 0;
+_Thread_local int local_node_batch = 0;
+_Thread_local int current_thread_id = 0;
+
+void reset_local_nodes(void) {
+  local_node_batch = 0;
+}
+
+void flush_local_nodes(void) {
+  if (local_node_batch > 0) {
+    atomic_fetch_add_explicit(&time_control.nodes, (uint64_t)local_node_batch, memory_order_relaxed);
+    local_node_batch = 0;
+  }
+}
 
 static int lmr[MAX_PLY][MAX_MOVES];
 
@@ -68,14 +80,13 @@ int search(const int ply, int depth, int alpha, int beta) {
     depth = 0;
 
   TimeControl *tc = &time_control;
-  search_local_node_batch++;
+  local_node_batch++;
 
-if (search_local_node_batch >= 1024) {
+  if (local_node_batch >= 1024) {
     atomic_fetch_add_explicit(&time_control.nodes, 1024, memory_order_relaxed);
-    search_local_node_batch = 0;
-    
-    check_tc_nodes(); // Or check_time() / whatever function Cwtch uses to check time limits
-}
+    local_node_batch = 0;
+    check_tc_nodes();
+  }
 
   if (alpha < -MATE + ply)
     alpha = -MATE + ply;
@@ -284,7 +295,7 @@ if (search_local_node_batch >= 1024) {
       best_move = move;
       if (score > alpha) {
         alpha = score;
-        if (is_root) {
+        if (is_root && current_thread_id == 0) {
           tc->best_move = best_move;
           tc->best_score = best_score;
         }

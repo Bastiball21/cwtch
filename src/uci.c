@@ -50,6 +50,8 @@ bool uci_exec(char *input) {
   if (str_eq(cmd, "uci", "")) {
     printf("id name %s %s\n", "Cwtch", BUILD);
     printf("id author Colin Jenkins & Basti Dangca\n");
+    printf("info string os %s | arch %s | cpu %s | simd %s\n",
+           net_os_name(), net_arch_name(), net_cpu_brand(), net_simd_name());
     printf("option name Hash type spin default %d min 1 max 262144\n", TT_DEFAULT_MB);
     printf("option name Threads type spin default 1 min 1 max 256\n");
     printf("option name UCI_Chess960 type check default false\n");
@@ -210,9 +212,12 @@ bool uci_exec(char *input) {
   }
 
   else if (str_eq(cmd, "net", "n")) {
+    printf("os: %s (%s)\n", net_os_name(), net_arch_name());
+    printf("cpu: %s\n", net_cpu_brand());
     printf("net: %s\n", NET_WEIGHTS_PATH);
     printf("arch: NNUE (%dx%d%s->%d)x2->1x%d\n", NET_I_SIZE, NET_I_BUCKETS, NET_MIRRORED ? "hm" : "", NET_H1_SIZE, NET_O_BUCKETS);
-    printf("act: squared relu\n");
+    printf("act: clipped squared relu (screlu)\n");
+    printf("simd: %s (runtime-dispatched: avx512_vnni | avx512bw | avx2 | scalar)\n", net_simd_name());
     printf("quant: QA=%d QB=%d QAB=%d scale=%d\n", NET_QA, NET_QB, NET_QAB, NET_SCALE);
   }
 
@@ -232,18 +237,29 @@ bool uci_exec(char *input) {
     bench(depth);
   }
 
-  else if (str_eq(cmd, "datagen", "dg")) {
+else if (str_eq(cmd, "datagen", "dg")) {
     if (ntokens < 3) {
-      printf("usage: datagen <directory> <positions>\n");
+      printf("usage: datagen <directory> <positions> [book_file|frc|dfrc]\n");
       return true;
     }
-    datagen(tokens[1], (uint64_t)atof(tokens[2]));
-  }
 
+    const char *third_arg = (ntokens > 3) ? tokens[3] : NULL;
+    if (third_arg && strcmp(third_arg, "frc") == 0) {
+      extern int dg_frc;
+      dg_frc = 1;
+      datagen(tokens[1], (uint64_t)atof(tokens[2]), NULL);
+    } else if (third_arg && strcmp(third_arg, "dfrc") == 0) {
+      extern int dg_dfrc;
+      dg_dfrc = 1;
+      datagen(tokens[1], (uint64_t)atof(tokens[2]), NULL);
+    } else {
+      datagen(tokens[1], (uint64_t)atof(tokens[2]), third_arg);
+    }
+  }
   else {
     printf("unknown command: %s\n", cmd);
   }
-
+  
   return true;
 
 }
