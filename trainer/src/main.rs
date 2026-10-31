@@ -193,6 +193,15 @@ impl PackedBoard {
 // Filtering and conversion
 // ---------------------------------------------------------------------------
 
+/// Which positions are thrown away before training.
+#[derive(Clone, Copy)]
+struct Filter {
+    /// Largest absolute score kept.
+    max_score: i32,
+    /// Also drop positions whose best move is a capture, en passant or promotion.
+    tactical: bool,
+}
+
 /// What a source decided about the positions it looked at.
 #[derive(Clone, Copy, Default)]
 struct SourceCounts {
@@ -205,7 +214,7 @@ struct SourceCounts {
 fn read_vf_game<R: Read>(
     reader: &mut R,
     records: &mut Vec<u8>,
-    score_filter: i32,
+    filter: Filter,
     counts: &mut SourceCounts,
     mut emit: impl FnMut(&PackedBoard, i16, f32),
 ) -> Result<bool, String> {
@@ -233,7 +242,7 @@ fn read_vf_game<R: Read>(
 
         if score != i16::MIN {
             counts.seen += 1;
-            if (score as i32).abs() <= score_filter && !board.is_tactical(mv) && !board.in_check() {
+            if (score as i32).abs() <= filter.max_score && !(filter.tactical && board.is_tactical(mv)) && !board.in_check() {
                 emit(&board, score, result);
                 counts.kept += 1;
             }
@@ -243,11 +252,12 @@ fn read_vf_game<R: Read>(
     Ok(true)
 }
 
-fn sf_filter(entry: &TrainingDataEntry, score_filter: i32) -> bool {
+fn sf_filter(entry: &TrainingDataEntry, filter: Filter) -> bool {
     entry.ply >= 16
-        && (entry.score as i32).abs() <= score_filter
-        && entry.mv.mtype() == MoveType::Normal
-        && entry.pos.piece_at(entry.mv.to()).piece_type() == PieceType::None
+        && (entry.score as i32).abs() <= filter.max_score
+        && (!filter.tactical
+            || (entry.mv.mtype() == MoveType::Normal
+                && entry.pos.piece_at(entry.mv.to()).piece_type() == PieceType::None))
         && !entry.pos.is_checked(entry.pos.side_to_move())
 }
 
@@ -383,7 +393,7 @@ const BLOCK_BOARDS: usize = 1 << 16;
 
 /// Reads one game at a time from each of its open files in turn, so a block of
 /// output already contains many files and many games.
-fn vf_worker(queue: Arc<Mutex<FileQueue>>, streams: usize, score_filter: i32, tx: SyncSender<Vec<ChessBoard>>) {
+fn vf_worker(queue: Arc<Mutex<FileQueue>>, streams: usize, filter: Filter, tx: SyncSender<Vec<ChessBoard>>) {
     let mut open: Vec<VfStream> = (0..streams).map(|_| open_vf(&queue)).collect();
     let mut block = Vec::with_capacity(BLOCK_BOARDS + 1024);
     let mut records = Vec::new();
@@ -396,7 +406,7 @@ fn vf_worker(queue: Arc<Mutex<FileQueue>>, streams: usize, score_filter: i32, tx
                     block.push(cb);
                 }
             };
-            match read_vf_game(stream, &mut records, score_filter, &mut counts, emit) {
+            match read_vf_game(stream, &mut records, filter, &mut counts, emit) {
                 Ok(true) => {}
                 Ok(false) => *stream = open_vf(&queue),
                 Err(e) => {
@@ -418,7 +428,7 @@ fn vf_worker(queue: Arc<Mutex<FileQueue>>, streams: usize, score_filter: i32, tx
 fn sf_worker(
     queue: Arc<Mutex<FileQueue>>,
     streams: usize,
-    score_filter: i32,
+    filter: Filter,
     score_mult: f32,
     tx: SyncSender<Vec<ChessBoard>>,
 ) {
@@ -434,7 +444,7 @@ fn sf_worker(
                     let mut reader = ChunkReader::default();
                     while reader.has_next(&chunk) {
                         let entry = reader.next(&chunk);
-                        if sf_filter(&entry, score_filter) {
+                        if sf_filter(&entry, filter) {
                             if let Some(cb) = convert_sf_entry(&entry, score_mult) {
                                 block.push(cb);
                             }
@@ -466,7 +476,7 @@ pub struct MixedLoader {
     vf_workers: usize,
     vf_streams_per_worker: usize,
     sf_workers: usize,
-    score_filter: i32,
+    filter: Filter,
     sf_score_mult: f32,
 }
 
@@ -477,7 +487,7 @@ impl MixedLoader {
             let queue = FileQueue::new(self.vf_files.clone(), "self-play");
             for _ in 0..self.vf_workers {
                 let (queue, tx) = (queue.clone(), tx.clone());
-                let (streams, filter) = (self.vf_streams_per_worker, self.score_filter);
+                let (streams, filter) = (self.vf_streams_per_worker, self.filter);
                 thread::spawn(move || vf_worker(queue, streams, filter, tx));
             }
             rx
@@ -489,7 +499,7 @@ impl MixedLoader {
             let per_worker = self.sf_files.len().div_ceil(self.sf_workers);
             for _ in 0..self.sf_workers {
                 let (queue, tx) = (queue.clone(), tx.clone());
-                let (filter, mult) = (self.score_filter, self.sf_score_mult);
+                let (filter, mult) = (self.filter, self.sf_score_mult);
                 thread::spawn(move || sf_worker(queue, per_worker, filter, mult, tx));
             }
             rx
@@ -638,7 +648,7 @@ impl ScaleStats {
     }
 }
 
-fn run_data_stats(vf_files: &[String], sf_files: &[String], per_source: u64, score_filter: i32) {
+fn run_data_stats(vf_files: &[String], sf_files: &[String], per_source: u64, filter: Filter) {
     println!("Fitting score scale on up to {per_source} kept positions per source (trainer uses scale {SCALE})");
 
     let mut all_vf = ScaleStats::new();
@@ -656,7 +666,7 @@ fn run_data_stats(vf_files: &[String], sf_files: &[String], per_source: u64, sco
         // Sample games across each file rather than draining one file
         for _ in 0..3000 {
             let emit = |_: &PackedBoard, score: i16, result: f32| all_vf.add(score as i32, result as f64);
-            match read_vf_game(&mut reader, &mut records, score_filter, &mut counts, emit) {
+            match read_vf_game(&mut reader, &mut records, filter, &mut counts, emit) {
                 Ok(true) => {}
                 _ => break,
             }
@@ -693,7 +703,7 @@ fn run_data_stats(vf_files: &[String], sf_files: &[String], per_source: u64, sco
                 while entries.has_next(&chunk) {
                     let entry = entries.next(&chunk);
                     seen += 1;
-                    if sf_filter(&entry, score_filter) {
+                    if sf_filter(&entry, filter) {
                         kept += 1;
                         let result = f64::from(1 + entry.result) / 2.0;
                         stats.add(entry.score as i32, result);
@@ -816,6 +826,8 @@ fn main() {
     let initial_lr             = get_env_f32("LEARNING_RATE", 0.001);
     let warmup_batches         = get_env_usize("WARMUP_BATCHES", 200);
     let score_filter           = get_env_i32("SCORE_FILTER", 10000);
+    let tactical_filter        = get_env_i32("TACTICAL_FILTER", 1) != 0;
+    let filter                 = Filter { max_score: score_filter, tactical: tactical_filter };
     let buffer_mb              = get_env_usize("BUFFER_MB", 4096);
     let vf_fraction            = get_env_f32("VF_FRACTION", 0.5).clamp(0.0, 1.0) as f64;
     let sf_score_mult          = get_env_f32("SF_SCORE_MULT", 1.0);
@@ -839,7 +851,7 @@ fn main() {
         panic!("DATA_PATH {} contains no .vf.zst or .binpack files", data_path);
     }
     if let Some(per_source) = std::env::var("DATA_STATS").ok().and_then(|v| v.parse::<u64>().ok()) {
-        run_data_stats(&vf_files, &sf_files, per_source, score_filter);
+        run_data_stats(&vf_files, &sf_files, per_source, filter);
         return;
     }
 
@@ -851,7 +863,7 @@ fn main() {
         vf_workers,
         vf_streams_per_worker: vf_streams,
         sf_workers,
-        score_filter,
+        filter,
         sf_score_mult,
     };
 
@@ -867,6 +879,7 @@ fn main() {
     println!("LEARNING_RATE          : {}", initial_lr);
     println!("WARMUP_BATCHES         : {}", warmup_batches);
     println!("SCORE_FILTER           : {}", score_filter);
+    println!("TACTICAL_FILTER        : {}", tactical_filter);
     println!("WDL_VALUE              : {}", wdl_value);
     println!("BUFFER_MB              : {}", buffer_mb);
     println!("VF_FRACTION            : {}", vf_fraction);
