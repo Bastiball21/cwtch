@@ -19,6 +19,7 @@
 #include "corrhist.h"
 #include "pv.h"
 #include "see.h"
+#include "tune.h"
 #include <stdatomic.h>
 
 _Thread_local int local_node_batch = 0;
@@ -56,7 +57,7 @@ static int lmr[MAX_PLY][MAX_MOVES];
 void init_lmr(void) {
   for (int d = 1; d < MAX_PLY; d++) {
     for (int m = 1; m < MAX_MOVES; m++) {
-      lmr[d][m] = 0.73 + log(d) * log(m < 64 ? m : 63) / 2.36;
+      lmr[d][m] = lmr_base / 100.0 + log(d) * log(m < 64 ? m : 63) / (lmr_div / 100.0);
     }
   }
 }
@@ -186,12 +187,12 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
   if (!is_pv && !excluded && !in_check) {
 
     // Reverse futility: too far above beta for a quiet reply to matter
-    if (depth <= 8 && !is_mate_score(ev) && beta > -MATEISH && ev >= beta + 75 * (depth - improving)) {
+    if (depth <= 8 && !is_mate_score(ev) && beta > -MATEISH && ev >= beta + rfp_margin * (depth - improving)) {
       return ev;
     }
 
     // Razoring: too far below alpha for anything but a tactic to save it
-    if (depth <= 3 && alpha < MATEISH && ev + 300 + depth * 100 <= alpha) {
+    if (depth <= 3 && alpha < MATEISH && ev + razor_base + depth * razor_mul <= alpha) {
       const int razor_score = qsearch(ply, alpha, alpha + 1);
       if (tc->finished)
         return 0;
@@ -201,12 +202,12 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
     }
 
     // Null move: if passing still beats beta, a real move almost surely will
-    if (depth > 2 && ev >= beta && static_ev >= beta - 20 && beta > -MATEISH && node->cont_entry &&
+    if (depth > 2 && ev >= beta && static_ev >= beta - nmp_static_margin && beta > -MATEISH && node->cont_entry &&
         ply >= nmp_min_ply && has_non_pawn_material(pos, stm) &&
         !(tt_hit && tt_bound == TT_ALPHA && tt_score < beta)) {
 
-      const int surplus = (ev - beta) / 200;
-      const int reduction = 4 + depth / 3 + (surplus < 3 ? surplus : 3);
+      const int surplus = (ev - beta) / nmp_eval_div;
+      const int reduction = 4 + depth / nmp_depth_div + (surplus < 3 ? surplus : 3);
       const int nmp_depth = depth - reduction;
 
       lazy_update_accs(node);
@@ -247,7 +248,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
     }
 
     // ProbCut: a good capture that beats beta by a margin at reduced depth
-    const int pc_beta = beta + 200 - 50 * improving;
+    const int pc_beta = beta + pc_margin - pc_improving * improving;
 
     if (depth >= 5 && !is_mate_score(beta) && !(tt_hit && tt_depth >= depth - 3 && tt_score < pc_beta)) {
 
@@ -326,30 +327,30 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
 
       if (is_quiet) {
 
-        if (!in_check && depth <= 8 && played >= (3 + depth * depth) / (2 - improving)) {
+        if (!in_check && depth <= 8 && played >= (lmp_base + depth * depth) / (2 - improving)) {
           node->skip_quiets = 1;
           continue;
         }
 
-        if (!in_check && lmr_depth <= 8 && static_ev + 100 + 100 * lmr_depth <= alpha) {
+        if (!in_check && lmr_depth <= 8 && static_ev + fut_base + fut_mul * lmr_depth <= alpha) {
           node->skip_quiets = 1;
           continue;
         }
 
-        if (depth <= 6 && hist < -4000 * depth)
+        if (depth <= 6 && hist < -hist_prune * depth)
           continue;
 
-        if (lmr_depth <= 8 && !see_ge(pos, move, -30 * lmr_depth * lmr_depth))
+        if (lmr_depth <= 8 && !see_ge(pos, move, -see_quiet * lmr_depth * lmr_depth))
           continue;
 
       }
       else {
 
         if (!in_check && depth <= 6 && !(move & (MOVE_FLAG_PROMOTE | MOVE_FLAG_EPCAPTURE)) &&
-            static_ev + see_values[pos->board[to]] + 150 + 100 * depth <= alpha)
+            static_ev + see_values[pos->board[to]] + cap_fut_base + cap_fut_mul * depth <= alpha)
           continue;
 
-        if (depth <= 8 && !see_ge(pos, move, -90 * depth))
+        if (depth <= 8 && !see_ge(pos, move, -see_noisy * depth))
           continue;
 
       }
@@ -359,7 +360,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
     int extension = 0;
     if (!is_root && !excluded && depth >= 8 && move == tt_move && tt_depth + 4 >= depth && (tt_bound & TT_BETA) && !is_mate_score(tt_score)) {
 
-      const int s_beta = tt_score - 4 * depth;
+      const int s_beta = tt_score - se_margin * depth;
       const int s_depth = (depth - 1) / 2;
 
       node->excluded_move = tt_move;
@@ -372,7 +373,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
 
       if (s_score < s_beta) {
         extension = 1;
-        if (!is_pv && s_score < s_beta - 16 && node->dextensions <= 6)
+        if (!is_pv && s_score < s_beta - dext_margin && node->dextensions <= 6)
           extension = 2;
       }
       else if (s_beta >= beta)
@@ -411,7 +412,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
         reduction += cutnode;
         reduction += tt_noisy;
         reduction -= is_attacked(next_pos, bsf(next_pos->all[piece_index(KING, opp)]), stm);
-        reduction -= hist / 12000;
+        reduction -= hist / lmr_hist_div;
       }
       else {
         reduction = reduction / 2 + !tt_pv;
@@ -425,7 +426,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
       if (!tc->finished && score > alpha && d < new_depth) {
 
         // how far above alpha it came back decides how much deeper to look
-        const int full_depth = new_depth + (score > best_score + 60 + 2 * new_depth) - (score < best_score + new_depth);
+        const int full_depth = new_depth + (score > best_score + lmr_deeper + 2 * new_depth) - (score < best_score + new_depth);
 
         if (d < full_depth)
           score = -search(ply+1, full_depth, -alpha-1, -alpha, !cutnode);
@@ -468,9 +469,9 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
           int stat_diff = in_check ? 0 : score - static_ev;
           if (stat_diff < 0) stat_diff = 0;
 
-          int bonus = (18 * depth * depth) + (stat_diff * depth / 4);
-          if (bonus > 2020)
-            bonus = 2020;
+          int bonus = (bonus_mul * depth * depth) + (stat_diff * depth / bonus_diff_div);
+          if (bonus > bonus_max)
+            bonus = bonus_max;
 
           for (int i=0; i < played; i++) {
             const move_t pm = node->played[i];

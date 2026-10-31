@@ -12,6 +12,7 @@
 #include "report.h"
 #include "nodes.h"
 #include "tt.h"
+#include "tune.h"
 #include "uci.h"
 #include "pos.h"
 #include "net.h"
@@ -44,7 +45,7 @@ void* search_worker(void* arg) {
   for (int depth = 1; depth <= tc->max_depth; depth++) {
     alpha = -INF;
     beta  = INF;
-    delta = 12 + (score * score) / 16384;
+    delta = asp_delta + (score * score) / 16384;
 
     if (depth >= 4) {
       alpha = score - delta > -INF ? score - delta : -INF;

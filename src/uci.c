@@ -17,6 +17,7 @@
 #include "tt.h"
 #include "input.h"
 #include "datagen.h"
+#include "tune.h"
 
 #define MAX_TOKENS 8192
 
@@ -90,6 +91,10 @@ static void uci_setoption(char *tokens[], const int ntokens) {
   else if (strcasecmp(name, "UCI_Chess960") == 0) {
     is_chess960 = (strcasecmp(value, "true") == 0);
   }
+#ifdef TUNE
+  else if (tune_set_option(name, atoi(value))) {
+  }
+#endif
   else {
     printf("info string unknown option %s\n", name);
   }
@@ -163,6 +168,9 @@ bool uci_exec(char *input) {
     printf("option name Clear Hash type button\n");
     printf("option name UCI_Chess960 type check default false\n");
     printf("option name LoadNet type string default\n");
+#ifdef TUNE
+    tune_print_options();
+#endif
     printf("uciok\n");
   }
 

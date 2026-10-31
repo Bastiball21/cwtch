@@ -15,9 +15,9 @@
 #include "see.h"
 #include "pv.h"
 #include "search.h"
+#include "tune.h"
 #include <stdatomic.h>
 
-#define QS_DELTA_MARGIN 200
 #define QS_QUIET_EVASIONS 3
 
 int qsearch(const int ply, int alpha, const int beta) {
@@ -118,7 +118,7 @@ int qsearch(const int ply, int alpha, const int beta) {
         continue;
 
       if (!in_check && !(move & (MOVE_FLAG_PROMOTE | MOVE_FLAG_EPCAPTURE))) {
-        const int gain = stand_pat + see_values[pos->board[move & 0x3F]] + QS_DELTA_MARGIN;
+        const int gain = stand_pat + see_values[pos->board[move & 0x3F]] + qs_delta;
         if (gain <= alpha) {
           if (gain > best_score)
             best_score = gain;

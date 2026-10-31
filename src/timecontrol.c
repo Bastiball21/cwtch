@@ -3,6 +3,7 @@
 #include "move.h"
 #include "nodes.h"
 #include "search.h"
+#include "tune.h"
 
 TimeControl time_control;
 int move_overhead = 10;
@@ -46,11 +47,12 @@ void init_tc(int64_t wtime, int64_t winc, int64_t btime, int64_t binc, int64_t m
     // The increment only arrives after this move, so nothing here may depend on
     // it being spendable: both limits are capped by what's on the clock.
     const int64_t usable = our_time - move_overhead > 1 ? our_time - move_overhead : 1;
-    const double base = moves_to_go ? (double)usable / moves_to_go + 0.85 * (double)our_inc
-                                    : 0.054 * (double)usable + 0.85 * (double)our_inc;
+    const double inc = tm_inc / 100.0 * (double)our_inc;
+    const double base = moves_to_go ? (double)usable / moves_to_go + inc
+                                    : tm_base / 1000.0 * (double)usable + inc;
     const double cap = 0.76 * (double)usable;
-    const double hard = min_d(3.04 * base, cap);
-    const double soft = min_d(0.76 * base, cap);
+    const double hard = min_d(tm_hard / 100.0 * base, cap);
+    const double soft = min_d(tm_soft / 100.0 * base, cap);
     tc->finish_time = tc->start_time + (uint64_t)(hard > 1 ? hard : 1);
     tc->soft_ms = (uint64_t)(soft > 1 ? soft : 1);
   }

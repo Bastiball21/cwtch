@@ -3,6 +3,7 @@
 #include "types.h"
 #include "pos.h"
 #include "corrhist.h"
+#include "tune.h"
 
 // The net has blind spots tied to particular structures. Each table remembers how
 // far search results landed from the static eval for one feature of the position,
@@ -13,13 +14,6 @@ static int16_t minor_corr[2][CORR_SIZE];
 static int16_t major_corr[2][CORR_SIZE];
 static int16_t nonpawn_corr[2][2][CORR_SIZE];  // [stm][colour]
 static int16_t cont_corr[2][12][64];           // [stm][previous piece][previous to]
-
-// weights out of 256
-#define W_PAWN 110
-#define W_MINOR 70
-#define W_MAJOR 70
-#define W_NONPAWN 70
-#define W_CONT 60
 
 void clear_corrhist(void) {
   memset(pawn_corr, 0, sizeof(pawn_corr));
@@ -78,11 +72,12 @@ int correct_eval(const Node *node, const int ev) {
   CorrEntries e;
   find_entries(node, &e);
 
-  const int weighted = W_PAWN * *e.pawn
-                     + W_MINOR * *e.minor
-                     + W_MAJOR * *e.major
-                     + W_NONPAWN * (*e.nonpawn[WHITE] + *e.nonpawn[BLACK])
-                     + (e.cont ? W_CONT * *e.cont : 0);
+  // weights out of 256
+  const int weighted = corr_pawn * *e.pawn
+                     + corr_minor * *e.minor
+                     + corr_major * *e.major
+                     + corr_nonpawn * (*e.nonpawn[WHITE] + *e.nonpawn[BLACK])
+                     + (e.cont ? corr_cont * *e.cont : 0);
 
   // scores drift towards a draw as the 50 move limit nears
   const int faded = ev * (200 - node->pos.hmc) / 200;
