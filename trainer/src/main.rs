@@ -805,8 +805,8 @@ fn normalize_data_path(raw: String) -> String {
 fn main() {
     let data_path              = normalize_data_path(std::env::var("DATA_PATH").unwrap_or_else(|_| "/mnt/d/Bulk-Data".to_string()));
     let hidden_size            = get_env_usize("HIDDEN_SIZE", 1536);
-    assert!(hidden_size > 0 && hidden_size % 32 == 0 && hidden_size <= 2048,
-            "HIDDEN_SIZE must be a multiple of 32 and <= 2048");
+    assert!(hidden_size > 0 && hidden_size % 32 == 0 && hidden_size <= 4096,
+            "HIDDEN_SIZE must be a multiple of 32 and <= 4096");
     let batch_size             = get_env_usize("BATCH_SIZE", 16384);
     let start_superbatch       = get_env_usize("START_SUPERBATCH", 1);
     let end_superbatch         = get_env_usize("SUPERBATCH", 600);
