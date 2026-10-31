@@ -30,9 +30,13 @@ typedef struct {
   uint8_t accs_dirty;
   move_t moves[MAX_MOVES];
   move_t played[MAX_MOVES];
+  move_t bad_noisy[MAX_MOVES];  // losing captures and underpromotions, tried last
   int num_moves;
   int32_t ranks[MAX_MOVES];
   int next_move;
+  int num_bad;
+  int next_bad;
+  int skip_quiets;
   int in_check;
   move_t tt_move;
   move_t excluded_move;  // se verification
@@ -42,7 +46,7 @@ typedef struct {
   move_t killer;
   int16_t (*cont_entry)[64];  // NULL at root and after null move
 
-  /* Countermove tracking tracking fields */
+  // move that led to this node, for the countermove table
   int prev_piece;
   int prev_to;
 

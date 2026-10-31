@@ -215,8 +215,7 @@ int search(const int ply, int depth, int alpha, int beta) {
       node->excluded_move = tt_move;
       const int s_score = search(ply, s_depth, s_beta - 1, s_beta);
       node->excluded_move = 0;
-      node->stage = 1;          
-      node->tt_move = tt_move;  
+      restart_after_tt_move(node, tt_move);
 
       if (tc->finished)
         return 0;
@@ -269,6 +268,8 @@ int search(const int ply, int depth, int alpha, int beta) {
         if (depth >= 3 && played >= 3 && is_quiet && !in_check) {
           int reduction = lmr[depth < MAX_PLY ? depth : MAX_PLY - 1][played];
           reduction -= hist / 8000;
+          if (reduction < 0)
+            reduction = 0;
           d -= reduction;
           d = (d < 1) ? 1 : d;
         }
@@ -287,6 +288,8 @@ int search(const int ply, int depth, int alpha, int beta) {
       if (depth >= 3 && played >= 2 && is_quiet && !in_check) {
         int reduction = lmr[depth < MAX_PLY ? depth : MAX_PLY - 1][played] + 1;
         reduction -= hist / 8000;
+        if (reduction < 0)
+          reduction = 0;
         d -= reduction;
         d = (d < 1) ? 1 : d;
       }
@@ -369,7 +372,10 @@ int search(const int ply, int depth, int alpha, int beta) {
   }
 
   if (played == 0) {
-    return in_check ? (-MATE + ply) : 0; 
+    // with a move excluded this says nothing about mate or stalemate
+    if (excluded)
+      return alpha;
+    return in_check ? (-MATE + ply) : 0;
   }
 
   if (!excluded && !in_check && best_score > -MATEISH && best_score < MATEISH && !(best_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE)) && !(alpha == orig_alpha && best_score >= ev))

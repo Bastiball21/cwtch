@@ -2,7 +2,9 @@
 #include "see.h"
 #include "move.h"
 
-static const int see_values[12] = {100, 325, 325, 500, 1000, 0, 100, 325, 325, 500, 1000, 0};
+// The king is worth more than anything it could win, so a capture by the king
+// never looks good while the square is still defended.
+const int see_values[12] = {100, 325, 325, 500, 1000, 20000, 100, 325, 325, 500, 1000, 20000};
 
 static uint64_t rank_mask[64];
 static uint64_t file_mask[64];
@@ -99,8 +101,8 @@ static uint64_t static_attackers_to(const Position *const pos, const int to_sq) 
 
 int see_ge(const Position *const pos, const move_t move, int threshold) {
 
-  // EP and promotions: don't filter (return "passes threshold")
-  if (move & ((MOVE_FLAG_EPCAPTURE | MOVE_FLAG_PROMOTE)))
+  // EP, promotions and castling: don't filter (return "passes threshold")
+  if (move & (MOVE_FLAG_EPCAPTURE | MOVE_FLAG_PROMOTE | MOVE_FLAG_CASTLE))
     return 1;
 
   const int stm     = pos->stm;
@@ -108,8 +110,9 @@ int see_ge(const Position *const pos, const move_t move, int threshold) {
   const int to_sq   = move & 0x3F;
   int attacker      = pos->board[from_sq];
   const int target  = pos->board[to_sq];
+  const int gained  = target == EMPTY ? 0 : see_values[target];
 
-  if (see_values[target] - see_values[attacker] >= threshold)
+  if (gained - see_values[attacker] >= threshold)
     return 1;
 
   uint64_t used           = 0ULL;
@@ -118,13 +121,10 @@ int see_ge(const Position *const pos, const move_t move, int threshold) {
   const uint64_t stat_atk = static_attackers_to(pos, to_sq);
   uint64_t rook_atk       = rook_attackers_to(pos, occ, to_sq);
   uint64_t bish_atk       = bishop_attackers_to(pos, occ, to_sq);
-  uint64_t attadef        = (stat_atk | rook_atk | bish_atk);
-
-  if ((attadef & from_set) == 0)
-    return 0;
+  uint64_t attadef        = stat_atk | rook_atk | bish_atk | from_set;  // a quiet pawn push doesn't attack `to`
 
   int gain[32], d = 0;
-  gain[0] = see_values[target] - threshold;
+  gain[0] = gained - threshold;
 
   do {
 

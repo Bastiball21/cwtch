@@ -13,6 +13,8 @@ void clear_nodes(void) {
     node->excluded_move = 0;
     node->dextensions = 0;
     node->ev = 0;
+    node->prev_piece = EMPTY;
+    node->prev_to = 0;
 
   }  
 
