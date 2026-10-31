@@ -7,6 +7,9 @@
 #include <immintrin.h>
 #include <cpuid.h>
 #endif
+#ifdef __linux__
+#include <sys/mman.h>
+#endif
 #include "net.h"
 #include "builtins.h"
 
@@ -28,7 +31,9 @@ INCBIN(weights, NET_WEIGHTS_PATH);
 // At NET_H1_SIZE=1536 and 16 buckets, net_h1_w is 36 MiB (exceeding a 32 MiB L3).
 // Fast inference relies on incremental accumulator updates (2-4 rows of 3 KiB per move)
 // and the Finny table below to refresh king-bucket transitions via bitboard diffs.
-static _Alignas(64) int16_t net_h1_w[NET_L0_SIZE];
+// Accumulator updates touch this table all over, so 4 KB pages would miss the TLB
+// constantly: aligned for huge pages, requested in unpack_weights().
+static _Alignas(1 << 21) int16_t net_h1_w[NET_L0_SIZE];
 static _Alignas(64) int16_t net_h1_b[NET_H1_SIZE];
 static _Alignas(64) int16_t net_o_w [NET_O_BUCKETS * NET_H1_SIZE * 2];
 static int32_t net_o_b [NET_O_BUCKETS];
@@ -657,6 +662,10 @@ void net_init_thread(void) {
 
 static void unpack_weights(const int16_t *weights) {
   size_t offset = 0;
+
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+  madvise(net_h1_w, sizeof(net_h1_w), MADV_HUGEPAGE);
+#endif
 
   for (int i=0; i < NET_L0_SIZE; i++) net_h1_w[i] = weights[i];
   offset += NET_L0_SIZE;
