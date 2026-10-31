@@ -57,7 +57,7 @@ int qsearch(const int ply, int alpha, const int beta) {
   if (!in_check) {
 
     raw_ev = (tt_hit && tte.eval != TT_NO_EVAL) ? tte.eval : net_eval(node);
-    stand_pat = correct_eval(pos, raw_ev);
+    stand_pat = correct_eval(node, raw_ev);
 
     // a stored search result is a better guess than the static eval when it
     // bounds the eval from the right side

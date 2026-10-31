@@ -162,7 +162,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
   }
   else if (!excluded) {  // the excluded search shares the eval of this same node
     raw_ev = (tt_hit && tte.eval != TT_NO_EVAL) ? tte.eval : net_eval(node);
-    node->ev = correct_eval(pos, raw_ev);
+    node->ev = correct_eval(node, raw_ev);
   }
 
   const int static_ev = node->ev;
@@ -485,7 +485,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
           }
 
           if (!excluded && !in_check && best_score < MATEISH && best_score > static_ev && !(best_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE)))
-            update_corrhist(pos, depth, best_score - static_ev);
+            update_corrhist(node, depth, best_score - static_ev);
           if (!excluded)
             tt_put(pos->hash, TT_BETA, depth, put_adjusted_score(ply, best_score), raw_ev, best_move, tt_pv);
           return score;
@@ -502,7 +502,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
   }
 
   if (!excluded && !in_check && !is_mate_score(best_score) && !(best_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE)) && !(alpha == orig_alpha && best_score >= static_ev))
-    update_corrhist(pos, depth, best_score - static_ev);
+    update_corrhist(node, depth, best_score - static_ev);
 
   if (!excluded)
     tt_put(pos->hash, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, depth, put_adjusted_score(ply, best_score), raw_ev, best_move, tt_pv);
