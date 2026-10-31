@@ -52,7 +52,10 @@ void update_capture_history(const Position *pos, const move_t move, int bonus) {
 
 void update_killer(Node *node, const move_t move) {
 
-  node->killer = move;
+  if (node->killer != move) {
+    node->killer2 = node->killer;
+    node->killer = move;
+  }
 
 }
 

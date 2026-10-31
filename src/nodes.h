@@ -44,6 +44,9 @@ typedef struct {
   int stage;
   int16_t ev;  // static eval
   move_t killer;
+  move_t killer2;
+  move_t prev_move;   // the move that led to this node, 0 at the root and after a null move
+  int cutoffs;        // beta cutoffs among this node's siblings so far
   int16_t (*cont_entry)[64];  // history after the previous move; NULL at root and after null move
   int16_t (*cont2)[64];       // ... after the move 2 plies back
   int16_t (*cont4)[64];       // ... after the move 4 plies back

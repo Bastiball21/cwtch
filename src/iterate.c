@@ -19,7 +19,8 @@ enum {
 
 // Far above any history sum, so these two are tried first among the quiets.
 #define KILLER_RANK (1 << 20)
-#define COUNTERMOVE_RANK (1 << 19)
+#define KILLER2_RANK (1 << 19)
+#define COUNTERMOVE_RANK (1 << 18)
 
 static inline int is_underpromotion(const move_t move) {
   return (move & MOVE_FLAG_PROMOTE) && ((move >> 12) & 7) != QUEEN;
@@ -70,6 +71,7 @@ static void rank_quiets(Node *node) {
   const uint8_t *board = node->pos.board;
   const move_t *moves = node->moves;
   const move_t killer = node->killer;
+  const move_t killer2 = node->killer2;
   int32_t *ranks = node->ranks;
   const int stm = node->pos.stm;
   const int n = node->num_moves;
@@ -88,6 +90,8 @@ static void rank_quiets(Node *node) {
 
     if (m == killer)
       ranks[i] += KILLER_RANK;
+    else if (m == killer2)
+      ranks[i] += KILLER2_RANK;
     else if (m == countermove)
       ranks[i] += COUNTERMOVE_RANK;
   }

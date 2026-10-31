@@ -80,11 +80,17 @@ static inline int has_non_pawn_material(const Position *pos, const int stm) {
   return (pos->colour[stm] & ~(pos->all[piece_index(PAWN, stm)] | pos->all[piece_index(KING, stm)])) != 0;
 }
 
-static inline void enter_child(Node *next_node, const int moved_piece, const int to) {
+static inline void enter_child(Node *next_node, const move_t move, const int moved_piece, const int to) {
   next_node->accs_dirty = 1;
   next_node->cont_entry = cont_history[moved_piece][to];
   next_node->prev_piece = moved_piece;
   next_node->prev_to = to;
+  next_node->prev_move = move;
+}
+
+static inline int history_bonus(const int depth, const int stat_diff) {
+  const int bonus = (bonus_mul * depth * depth) + (stat_diff * depth / bonus_diff_div);
+  return bonus > bonus_max ? bonus_max : bonus;
 }
 
 int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
@@ -112,13 +118,16 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
       // checkmate on the move that reaches the 50 move limit still counts as mate
       if (pos->hmc >= 100 && in_check && !first_legal_move(node))
         return -MATE + ply;
-      return 0;
+      // a little noise keeps the search from settling on the first repetition it sees
+      return 1 - (int)(thread_nodes & 2);
     }
   }
 
   node->dextensions = is_root ? 0 : nodes[ply-1].dextensions;
   node->cont2 = ply >= 1 ? nodes[ply-1].cont_entry : NULL;
   node->cont4 = ply >= 3 ? nodes[ply-3].cont_entry : NULL;
+  if (ply + 2 < MAX_PLY)
+    nodes[ply+2].cutoffs = 0;
 
   if (depth <= 0 && !in_check) {
     return qsearch(ply, alpha, beta);
@@ -147,6 +156,13 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
 
   if (!is_pv && !excluded && tt_hit && tt_depth >= depth && pos->hmc < 90 &&
       (tt_bound & (tt_score >= beta ? TT_BETA : TT_ALPHA))) {
+
+    // a stored cutoff is still evidence that the quiet move behind it is good
+    if (tt_score >= beta && tt_move && !tt_noisy) {
+      update_killer(node, tt_move);
+      update_quiet_histories(node, pos, tt_move, history_bonus(depth, 0));
+    }
+
     return tt_score;
   }
 
@@ -219,6 +235,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
       next_node->cont_entry = NULL;
       next_node->prev_piece = EMPTY;
       next_node->prev_to = 0;
+      next_node->prev_move = 0;
 
       const int score = -search(ply+1, nmp_depth, -beta, -beta+1, !cutnode);
 
@@ -274,7 +291,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
         if (is_attacked(next_pos, bsf(next_pos->all[stm_king_idx]), opp))
           continue;
 
-        enter_child(next_node, moved_piece, to);
+        enter_child(next_node, move, moved_piece, to);
 
         int score = -qsearch(ply+1, -pc_beta, -pc_beta+1);
 
@@ -390,7 +407,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
     if (is_attacked(next_pos, bsf(*next_stm_king_ptr), opp))
       continue;
 
-    enter_child(next_node, moved_piece, to);
+    enter_child(next_node, move, moved_piece, to);
 
     node->played[played++] = move;
 
@@ -412,6 +429,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
         reduction += cutnode;
         reduction += tt_noisy;
         reduction -= is_attacked(next_pos, bsf(next_pos->all[piece_index(KING, opp)]), stm);
+        reduction += next_node->cutoffs > 3;
         reduction -= hist / lmr_hist_div;
       }
       else {
@@ -469,9 +487,9 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
           int stat_diff = in_check ? 0 : score - static_ev;
           if (stat_diff < 0) stat_diff = 0;
 
-          int bonus = (bonus_mul * depth * depth) + (stat_diff * depth / bonus_diff_div);
-          if (bonus > bonus_max)
-            bonus = bonus_max;
+          const int bonus = history_bonus(depth, stat_diff);
+
+          node->cutoffs++;
 
           for (int i=0; i < played; i++) {
             const move_t pm = node->played[i];
@@ -509,6 +527,12 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
     if (excluded)
       return alpha;
     return in_check ? (-MATE + ply) : 0;
+  }
+
+  // Nothing here beat alpha, so the quiet move that led here was a good one
+  if (!excluded && alpha == orig_alpha && ply > 0 && node->prev_move &&
+      !(node->prev_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE))) {
+    update_quiet_histories(&nodes[ply-1], &nodes[ply-1].pos, node->prev_move, history_bonus(depth, 0));
   }
 
   if (!excluded && !in_check && !is_mate_score(best_score) && !(best_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE)) && !(alpha == orig_alpha && best_score >= static_ev))

@@ -52,17 +52,22 @@ void* search_worker(void* arg) {
       beta  = score + delta < INF ? score + delta : INF;
     }
 
+    int search_depth = depth;
+
     while (1) {
-      score = search(0, depth, alpha, beta, 0);
+      score = search(0, search_depth, alpha, beta, 0);
 
       if (tc->finished) break;
 
       if (score <= alpha) {
         beta = (alpha + beta) / 2;
         alpha = score - delta > -INF ? score - delta : -INF;
+        search_depth = depth;
       }
       else if (score >= beta) {
         beta = score + delta < INF ? score + delta : INF;
+        if (search_depth > 1 && score < MATEISH)
+          search_depth--;
       }
       else {
         break;

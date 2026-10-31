@@ -140,6 +140,7 @@ int qsearch(const int ply, int alpha, const int beta) {
     next_node->accs_dirty = 1;
     next_node->cont_entry = NULL;
     next_node->prev_piece = EMPTY;
+    next_node->prev_move = 0;
     played++;
     if (is_quiet)
       quiet_evasions++;
