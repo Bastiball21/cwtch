@@ -6,5 +6,5 @@ if [ "$#" -gt 1 ]; then
   exit 1
 fi
 
-./cwtch "bench $1"
-./releases/cwtch "bench $1"
+./cwtch "bench ${1:-10}"
+./releases/cwtch "bench ${1:-10}"

@@ -16,28 +16,38 @@ Cwtch is a UCI chess engine written in C. It includes a self-play data generatio
 make
 ```
 
-This automatically detects your host OS (`linux`, `windows`, `macos`) and CPU architecture (`x86_64`, `aarch64`) and builds a universal `./cwtch` binary. On `x86_64`, the binary automatically detects the user's CPU model and dispatches NNUE inference and accumulator updates to the fastest supported instruction set at runtime (`avx512_vnni`, `avx512bw`, `avx2`, or `scalar`).
+This detects your host OS and CPU architecture and builds `./cwtch` for them. On `x86_64` one binary detects the CPU and dispatches NNUE inference and accumulator updates to the fastest supported instruction set at runtime (`avx512_vnni`, `avx512bw`, `avx2`, or `scalar`).
+
+```
+make test           # build, then run perft, SIMD agreement, bench determinism and UCI checks
+```
 
 For release builds:
 
 ```
-make release        # Universal Linux binary in ./releases/cwtch_7.0_linux_x86_64
-make release-win    # Universal Windows binary in ./releases/cwtch_7.0_windows_x86_64.exe
+make release        # Static Linux binary in ./releases/cwtch_7.1_linux_x86_64
+make release-win    # Static Windows binary in ./releases/cwtch_7.1_windows_x86_64.exe
 make release-all    # Linux, Windows, and aarch64 release binaries
 ```
 
+`make clean` removes build output but leaves `releases/` alone.
+
 ## UCI Options
 
-- `option name Hash type spin default 256 min 1 max 262144`
+- `option name Hash type spin default 256 min 1 max 262144` - exact size in MB, not rounded to a power of two.
 - `option name Threads type spin default 1 min 1 max 256`
+- `option name Move Overhead type spin default 10 min 0 max 5000` - milliseconds kept back from the clock for GUI and network lag.
+- `option name Clear Hash type button`
 - `option name UCI_Chess960 type check default false`
 - `option name LoadNet type string default`
+
+`info` lines report `depth`, `seldepth`, `score cp` or `score mate`, `time`, `nodes`, `nps`, `hashfull` and `pv`. With no legal move the engine answers `bestmove 0000`. `go infinite` always waits for `stop`, and `stop` and `isready` are answered during a search.
 
 ## UCI Command Extensions
 
 - `quit` / `q` - exit.
 - `bench [depth]` - benchmark search to a given depth (default 10).
-- `eval` / `e` - print current position evaluation.
+- `eval` / `e` - print the net's evaluation of the current position, from the side to move.
 - `board` / `b` - print board.
 - `perft` / `f depth` - run perft.
 - `pt [max_depth]` - run perft suite.
@@ -64,12 +74,15 @@ datagen <directory> <positions> [book_file|frc|dfrc]
 
 All game parameters can be adjusted using the constants in `src/datagen.c`. Key constants:
 
-- `DG_SEARCH_NODES` (default 3000) - nodes per move during self-play.
-- `DG_DOWNSAMPLE_RATE` (default 3) - record 1 in N positions.
-- `DG_MIN_RECORD_PLY` (default 16) - skip the first N plies (openings).
-- `DG_EXTRA_PLIES_MAX` (default 6) - random extra plies after book/FRC/DFRC start.
+- `DG_SEARCH_NODES` (default 5000) - soft nodes per move: the iteration in progress is finished, so scores come from complete searches.
+- `DG_HARD_NODES` (default 100000) - hard limit per move.
+- `DG_DOWNSAMPLE_RATE` (default 1) - record 1 in N positions.
+- `DG_MIN_RECORD_PLY_STD` / `DG_MIN_RECORD_PLY_FRC` (default 10 / 8) - skip the first N plies after the opening.
+- `DG_EXTRA_PLIES_BOOK` / `_FRC` / `_DFRC` (default 3 / 8 / 4) - most random extra plies after the start.
 - `BLOOM_SIZE_BYTES` (default 64 MB) - Bloom filter size for deduplication.
-- `BLOOM_RESET_POSITIONS` (default 50M) - reset Bloom filter every N positions.
+- `BLOOM_RESET_INSERTS` (default 50M) - reset the Bloom filter every N inserts.
+
+If a write fails (a full disk, for example) datagen stops, records `write_failed 1` in the manifest and exits with an error.
 
 Examples:
 
@@ -90,7 +103,7 @@ Use the included `run_datagen.sh` script to launch multiple datagen processes in
 ./run_datagen.sh /path/to/book.epd
 ```
 
-The script writes compressed data to `/mnt/d/cwtch_datagen/data` and logs to `/mnt/d/cwtch_datagen/logs`. Edit the constants at the top of the script to change `TARGET_POSITIONS` and `THREADS`.
+The script writes compressed data to `$OUTPUT_BASE/data` and logs to `$OUTPUT_BASE/logs`. `BINARY`, `OUTPUT_BASE`, `TARGET_POSITIONS` and `THREADS` can all be set in the environment.
 
 ## Data Format (`.vf.zst`)
 
@@ -109,45 +122,71 @@ Files are compressed with zstd. The compression level is set in `datagen.c` (def
 
 ### Deduplication and Filtering
 
-- Bloom filter: skips positions whose Zobrist hash was already seen. Resets every 50 million positions to avoid saturation.
-- Downsampling: only records 1 in N positions to reduce temporal correlation.
-- Skip early plies: ignores the first 16 plies to avoid over-representing standard openings.
+Datagen filters as it plays:
+
+- Bloom filter: skips positions whose Zobrist hash was already seen, within one process. It resets every 50 million inserts to avoid saturation.
+- Skip early plies, positions in check, and positions with only one legal move.
+
+Filtered positions keep their move, so the trainer can replay the game, but carry a sentinel score and are never trained on.
+
+The trainer filters again, so the rule can change without regenerating data: it drops positions whose best move is a capture, en passant or promotion, positions in check, and scores above `SCORE_FILTER`.
 
 ## Training
 
-The trainer is a separate Rust project (`trainer/`). It uses a custom `VfLoader` to read compact game records and decompress `.vf.zst` files directly.
+The trainer is a separate Rust project (`trainer/`). It reads `.vf.zst` self-play files and Stockfish `.binpack` files directly.
 
 ### Trainer Setup
 
-1. Ensure you have Rust installed.
+1. Install Rust, and for GPU training the CUDA toolchain bullet needs.
 
-2. Add dependencies to `Cargo.toml`:
+2. Check out its two dependencies beside this repository, at the revisions the patches apply to:
 
 ```
-[dependencies]
-bullet_lib = { git = "https://github.com/jw1912/bullet", features = ["cuda"] }
-bullet_trainer = { git = "https://github.com/jw1912/bullet" }
-zstd = "0.13"
-rand = "0.8"
+cd ..
+git clone https://github.com/jw1912/bullet
+git -C bullet checkout cebc78a093d92cbc87e56cfef049184c225270b0
+git -C bullet apply ../cwtch/trainer/patches/bullet.patch
+git clone https://github.com/Disservin/binpack-rust sfbinpack-patched
+git -C sfbinpack-patched checkout 5b82b204fecf8d5eca3af813511c63259a125a99
+git -C sfbinpack-patched apply ../cwtch/trainer/patches/sfbinpack.patch
 ```
 
-3. Configure via environment variables (or edit defaults in `main.rs`):
+`bullet.patch` pins the GPU architecture string for current NVIDIA cards. `sfbinpack.patch` guards a pawn attack lookup against an out of range square.
 
-- `DATA_PATH` (default `/mnt/d/Bulk-Data`, or `D:\Bulk-Data`) - directory containing `.vf.zst` / `.binpack` files.
-- `HIDDEN_SIZE` (default 1536) - hidden layer size.
-- `OUTPUT_BUCKETS` (default 8) - number of output buckets.
-- `BATCH_SIZE` (default 16384) - training batch size.
-- `SUPERBATCH` (default 600) - number of superbatches.
-- `LEARNING_RATE` (default 0.001) - initial learning rate.
-- `WARMUP_BATCHES` (default 200) - LR warmup batches.
-- `LOAD_CHECKPOINT` (none) - path to checkpoint to resume from.
-- `SAVE_CHECKPOINT` (none) - path to save checkpoint after training.
+3. Build with `cargo build --release` in `trainer/`.
 
-4. Run the trainer:
+4. Configure with environment variables:
+
+- `DATA_PATH` (default `/mnt/d/Bulk-Data`) - directory containing `.vf.zst` / `.binpack` files.
+- `VF_FRACTION` (default 0.5) - share of every shuffle buffer taken from self-play; the rest comes from binpacks. Set to 1.0 for self-play only.
+- `SF_SCORE_MULT` (default 1.0) - multiplier on binpack scores, to match the self-play score scale.
+- `BUFFER_MB` (default 4096) - shuffle buffer size. Two buffers exist at once.
+- `SCORE_FILTER` (default 10000) - drop positions with a larger absolute score.
+- `HIDDEN_SIZE` (default 1536) - hidden layer size, must match `NET_H1_SIZE` in the engine.
+- `BATCH_SIZE` (default 16384), `BATCHES_PER_SUPERBATCH` (default 6104), `SUPERBATCH` (default 600), `SAVE_RATE` (default 50).
+- `LEARNING_RATE` (default 0.001), `WARMUP_BATCHES` (default 200), `WDL_VALUE` (default 0.4).
+- `OUTPUT_DIR` (default `nets`), `NET_ID` (default `cwtch`).
+- `VF_WORKERS` (default 6), `VF_STREAMS_PER_WORKER` (default 12), `SF_WORKERS` (default 6), `TRAIN_THREADS` (default 24).
+- `LOAD_CHECKPOINT` (none), `SAVE_CHECKPOINT` (none), `START_SUPERBATCH` (default 1).
+
+5. Run the trainer. `run_trainer.sh` resumes from the newest checkpoint after a crash:
 
 ```
 ./run_trainer.sh
 ```
+
+### Loader
+
+Training quality depends heavily on what's in each batch, so the loader streams rather than reading files whole:
+
+- Self-play is read one game at a time from many open files, and binpacks one chunk at a time from all of them.
+- Each shuffle buffer holds exactly the requested mix of sources.
+- Files are dealt in shuffled passes, and binpack streams start at a random chunk, so runs that never finish a file still sample all of it.
+- The next buffer is filled and shuffled in the background while the current one trains.
+
+### Checking Score Scales
+
+`DATA_STATS=<positions> ./target/release/trainer` fits, per source, the scale at which `sigmoid(score / scale)` best predicts the game result, and prints how many positions the filter keeps. Run this before mixing a new data source: on the current data self-play fits about 285 and binpacks about 327, so `SF_SCORE_MULT=0.87` brings them together.
 
 ### Model Architecture
 
@@ -158,37 +197,11 @@ rand = "0.8"
 
 The saved network is written to the `nets/` directory in a format compatible with the engine (`quantised.bin`). `bullet_lib` stores `l0w` in column-major layout (`[12288][1536]`), which directly matches the engine's input-major accumulator layout without transposition.
 
-### Two-Stage Training Pipeline
+### Evaluating a Net
 
-For best results, train in stages:
+Loss doesn't rank nets. Compare them in games, at fixed nodes so that speed doesn't blur the result. Checkpoints from part way through a run are not comparable with finished nets, because the learning rate is still high when they are saved.
 
-1. Bulk pre-training - 10 billion positions at 3k nodes (broad knowledge).
-2. Fine-tuning - 100-200 million positions at 20k nodes (accurate eval).
-3. Final polish - 10-30 million positions at 100k nodes (sharp tactics and endgames).
-
-Use checkpoints to preserve weights and optimizer state between stages:
-
-```
-# Stage 1: bulk
-DATA_PATH=bulk_data LEARNING_RATE=0.001 SUPERBATCH=600 SAVE_CHECKPOINT=bulk.bin cargo run --release
-
-# Stage 2: fine-tune
-DATA_PATH=finetune_data LOAD_CHECKPOINT=bulk.bin LEARNING_RATE=0.0001 SUPERBATCH=50 SAVE_CHECKPOINT=finetuned.bin cargo run --release
-
-# Stage 3: polish (optional)
-DATA_PATH=polish_data LOAD_CHECKPOINT=finetuned.bin LEARNING_RATE=0.00005 SUPERBATCH=20 SAVE_CHECKPOINT=final.bin cargo run --release
-```
-
-### Data Generation and Training Pipeline
-
-1. Generate data with the engine:
-   ```
-   ./cwtch datagen /path/to/data 1000000 book.txt
-   ```
-2. Ensure the output directory contains `.vf.zst` files.
-3. Run the trainer as shown above.
-4. The trainer saves `quantised.bin` into `trainer/nets/`.
-5. Copy `quantised.bin` to the engine's directory and use the `loadnet` command, or embed it via `incbin` and rebuild.
+To use a net, copy its `quantised.bin` over the one in the repository root and rebuild, or use the `loadnet` command.
 
 ## Chess960 / FRC / DFRC Support
 
@@ -204,24 +217,16 @@ Castling rights are stored using Shredder-FEN (file letters), and castling moves
 - EPD / FEN: plain text, one position per line. Extra EPD operations are ignored.
 - PGN: only `[FEN "..."]` headers are used. If a game has no FEN tag, it is skipped. For full PGN support (e.g., extracting FENs from move text), pre-process with a tool like `pgn-extract`.
 
-Increase `MAX_BOOK_FENS` in `datagen.c` if your book has more than 1,000,000 lines (e.g., UHO_Lichess_4852_v1.epd has 2.6M).
+`MAX_BOOK_FENS` in `datagen.c` limits books to 3,000,000 lines. Invalid lines are skipped with a warning.
 
-## Recommended Data Mix
+## Testing
 
-For a strong 4096 net, a balanced dataset is:
-
-- DFRC: 2.5 billion positions (most opening diversity, 921,600 starts).
-- FRC: 2.5 billion positions (symmetric Chess960, 960 starts with extra random plies).
-- Standard (book): 5 billion positions (use a large book such as UHO with 2.6M lines).
-- Total: 10 billion positions.
-
-Then add 100-200 million at 20k nodes for fine-tuning, and optionally 10-30 million at 100k for final polish.
+`bin/sprt [stc|ltc]` plays `./cwtch_test` against `./cwtch_base` with SPRT bounds [0, 10]. `MARGIN` sets fastchess's time margin in milliseconds (default 50). Keep it small, because a large margin hides engines overrunning their clock.
 
 ## Future Improvements
 
-- Universal binaries with runtime CPU dispatch for AVX2 / AVX-512.
-- Search improvements: Lazy SMP tuning, tablebases, better move ordering.
-- Further network scaling: 5120 or 6144 hidden if data allows.
+- Search: parameter tuning with SPSA, tablebases, threat-aware history, upcoming-repetition detection.
+- Lazy SMP tuning: a thread pool, and per-thread histories.
 
 ## Acknowledgements
 
