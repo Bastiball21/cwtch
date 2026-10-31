@@ -153,15 +153,19 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
     depth--;
   }
 
-  lazy_update_accs(node);
-
   int raw_ev = TT_NO_EVAL;
 
   if (in_check) {
     node->ev = TT_NO_EVAL;
   }
   else if (!excluded) {  // the excluded search shares the eval of this same node
-    raw_ev = (tt_hit && tte.eval != TT_NO_EVAL) ? tte.eval : net_eval(node);
+    if (tt_hit && tte.eval != TT_NO_EVAL) {
+      raw_ev = tte.eval;
+    }
+    else {
+      lazy_update_accs(node);
+      raw_ev = net_eval(node);
+    }
     node->ev = correct_eval(node, raw_ev);
   }
 
@@ -205,6 +209,7 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
       const int reduction = 4 + depth / 3 + (surplus < 3 ? surplus : 3);
       const int nmp_depth = depth - reduction;
 
+      lazy_update_accs(node);
       pos_copy(pos, next_pos);
       make_null_move(next_pos);
       tt_prefetch(next_pos->hash);
@@ -248,6 +253,8 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
 
       const int threshold = pc_beta - static_ev;
       move_t move;
+
+      lazy_update_accs(node);
 
       init_next_qsearch_move(node, 0, (tt_noisy && (!(tt_move & MOVE_FLAG_PROMOTE) || ((tt_move >> 12) & 7) == QUEEN)) ? tt_move : 0);
 
@@ -295,6 +302,8 @@ int search(const int ply, int depth, int alpha, int beta, const int cutnode) {
   const uint64_t *next_stm_king_ptr = &next_pos->all[stm_king_idx];
   const int orig_alpha = alpha;
   const int lmr_row = depth < MAX_PLY ? depth : MAX_PLY - 1;
+
+  lazy_update_accs(node);  // children update from this node's accumulators
 
   init_next_search_move(node, in_check, tt_move);
 

@@ -48,15 +48,19 @@ int qsearch(const int ply, int alpha, const int beta) {
     return tt_score;
   }
 
-  lazy_update_accs(node);
-
   int raw_ev = TT_NO_EVAL;
   int stand_pat = 0;
   int best_score = -MATE + ply;
 
   if (!in_check) {
 
-    raw_ev = (tt_hit && tte.eval != TT_NO_EVAL) ? tte.eval : net_eval(node);
+    if (tt_hit && tte.eval != TT_NO_EVAL) {
+      raw_ev = tte.eval;
+    }
+    else {
+      lazy_update_accs(node);
+      raw_ev = net_eval(node);
+    }
     stand_pat = correct_eval(node, raw_ev);
 
     // a stored search result is a better guess than the static eval when it
@@ -97,6 +101,8 @@ int qsearch(const int ply, int alpha, const int beta) {
 
   node->cont2 = NULL;
   node->cont4 = NULL;
+
+  lazy_update_accs(node);  // children update from this node's accumulators
 
   init_next_qsearch_move(node, in_check, tt_move);
 
