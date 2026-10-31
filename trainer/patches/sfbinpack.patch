@@ -1,0 +1,12 @@
+diff --git a/src/chess/attacks.rs b/src/chess/attacks.rs
+index e7cde0b..620bdae 100644
+--- a/src/chess/attacks.rs
++++ b/src/chess/attacks.rs
+@@ -295,6 +295,7 @@ fn pieces_attacking_square(sq: Square, c: Color, pos: &Position) -> Bitboard {
+ 
+ /// Get pseudo pawn attacks for a given color and square.
+ pub fn pawn(color: Color, sq: Square) -> Bitboard {
++    if sq.index() >= 64 { return Bitboard::new(0); }
+     Bitboard::new(PAWN_ATTACKS[color as usize][sq.index() as usize])
+ }
+ 

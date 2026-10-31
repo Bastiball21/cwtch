@@ -43,7 +43,11 @@
 
 extern int is_chess960;
 
+// Nodes per move. Soft: the current iteration finishes, so the score comes from a
+// complete search instead of one cut off part way through. The hard limit only
+// guards against a search that explodes.
 #define DG_SEARCH_NODES        5000
+#define DG_HARD_NODES          100000
 #define DG_DRAW_SCORE          10
 #define DG_DRAW_COUNT          10
 #define DG_DRAW_PLY            30
@@ -116,6 +120,16 @@ static uint64_t dg_fallback_moves = 0;
 // --- Signal handling ---
 static volatile sig_atomic_t dg_stop_requested = 0;
 
+// Set when the disk rejects a write: games after that point would be lost silently.
+static int dg_write_failed = 0;
+
+static void dg_fwrite(const void *data, size_t size, FILE *fp) {
+    if (size && fwrite(data, 1, size, fp) != size && !dg_write_failed) {
+        fprintf(stderr, "error: write failed, is the disk full? stopping datagen\n");
+        dg_write_failed = 1;
+    }
+}
+
 static void dg_handle_signal(int sig) {
     (void)sig;
     dg_stop_requested = 1;
@@ -166,9 +180,10 @@ static void free_bloom(void) {
     bloom_filter = NULL;
 }
 
-// 2-hash Bloom filter. Uses two independent bit positions derived from the
-// same 64-bit hash. Reduces false-positive rate from ~9% (1-bit) to <1% at
-// the 50M-insertion reset point, using the same 64 MB.
+// 2-hash Bloom filter. Uses two bit positions derived from the same 64-bit hash.
+// At the 50M-insertion reset point about 17% of the bits are set, so about 3% of
+// genuinely new positions are wrongly rejected just before a reset (under 1% on
+// average over the filter's life).
 //
 // Epoch counters (bloom_insertions, dg_duplicate_rejects) are reset together
 // with the filter so the live dup-rate display stays meaningful. Lifetime
@@ -215,7 +230,13 @@ static int book_order_pos = 0;
 int dg_frc = 0;
 int dg_dfrc = 0;
 
+static int book_line_usable(const char *fen);
+
 static void add_book_fen(const char *fen) {
+    if (!book_line_usable(fen)) {
+        fprintf(stderr, "warning: skipping invalid book line: %.80s\n", fen);
+        return;
+    }
     if (book_count >= MAX_BOOK_FENS) {
         fprintf(stderr, "warning: book exceeds %d positions, ignoring extras\n", MAX_BOOK_FENS);
         return;
@@ -343,6 +364,11 @@ static void set_position_from_fen(Node *node, const char *fen) {
     }
     if (*p) hmc = atoi(p);
     position(node, board, side, castling, ep, hmc, 0, NULL);
+}
+
+static int book_line_usable(const char *fen) {
+    char board[128];
+    return sscanf(fen, "%127s", board) == 1 && fen_board_valid(board);
 }
 
 static void shuffle_book_order(void) {
@@ -613,7 +639,7 @@ static void write_compressed(ZSTD_CStream* cstream, FILE* fp, const void* data, 
             fprintf(stderr, "ZSTD_compressStream error: %s\n", ZSTD_getErrorName(ret));
             exit(1);
         }
-        fwrite(outBuff, 1, output.pos, fp);
+        dg_fwrite(outBuff, output.pos, fp);
     }
 }
 
@@ -713,7 +739,8 @@ static int play_game(FILE *fp, ZSTD_CStream* cstream, void* outBuff, size_t outB
             break;
         }
 
-        init_tc(0, 0, 0, 0, DG_SEARCH_NODES, 0, 0, 0, 0);
+        init_tc(0, 0, 0, 0, DG_HARD_NODES, 0, 0, 0, 0);
+        time_control.soft_nodes = DG_SEARCH_NODES;
         time_control.best_move = 0;
         time_control.best_score = 0;
         go(1);
@@ -843,7 +870,7 @@ static void write_manifest_config(const char *path, const char *data_file,
     fprintf(m, "book_file         %s\n", book_file ? book_file : "(none)");
     fprintf(m, "book_positions    %d\n", book_count);
     fprintf(m, "target_positions  %llu\n", (unsigned long long)target_positions);
-    fprintf(m, "search_nodes      %d\n", DG_SEARCH_NODES);
+    fprintf(m, "search_nodes      %d (soft, hard %d)\n", DG_SEARCH_NODES, DG_HARD_NODES);
     fprintf(m, "min_record_ply    %d\n", min_record_ply);
     fprintf(m, "draw_score        %d\n", DG_DRAW_SCORE);
     fprintf(m, "draw_count        %d\n", DG_DRAW_COUNT);
@@ -878,6 +905,7 @@ static void write_manifest_result(const char *path,
     fprintf(m, "positions         %llu\n", (unsigned long long)positions);
     fprintf(m, "games             %llu\n", (unsigned long long)games);
     fprintf(m, "wall_seconds      %llu\n", (unsigned long long)(wall_ms / 1000ULL));
+    fprintf(m, "write_failed      %d\n", dg_write_failed);
     fprintf(m, "dup_queries       %llu\n", (unsigned long long)dg_total_queries);
     fprintf(m, "dup_rejects       %llu\n", (unsigned long long)dg_total_duplicates);
     fprintf(m, "dup_rate_pct      %.2f\n", dup_pct);
@@ -973,6 +1001,9 @@ void datagen(const char *directory, uint64_t target_positions, const char *book_
             break;
         }
 
+        if (dg_write_failed)
+            break;
+
         int samples = play_game(fp, cstream, outBuff, outBuffSize);
         total_positions += samples;
         total_games++;
@@ -994,7 +1025,7 @@ void datagen(const char *directory, uint64_t target_positions, const char *book_
             ZSTD_outBuffer output = { outBuff, outBuffSize, 0 };
             while (true) {
                 size_t r = ZSTD_flushStream(cstream, &output);
-                fwrite(outBuff, 1, output.pos, fp);
+                dg_fwrite(outBuff, output.pos, fp);
                 output.pos = 0;
                 if (r == 0) break;
                 if (ZSTD_isError(r)) {
@@ -1002,7 +1033,8 @@ void datagen(const char *directory, uint64_t target_positions, const char *book_
                     break;
                 }
             }
-            fflush(fp);
+            if (fflush(fp) != 0)
+                dg_write_failed = 1;
 
             uint64_t elapsed = now - start_time;
             uint64_t pps = elapsed ? (total_positions * 1000ULL / elapsed) : 0;
@@ -1046,7 +1078,7 @@ void datagen(const char *directory, uint64_t target_positions, const char *book_
     ZSTD_outBuffer output = { outBuff, outBuffSize, 0 };
     while (true) {
         size_t r = ZSTD_endStream(cstream, &output);
-        fwrite(outBuff, 1, output.pos, fp);
+        dg_fwrite(outBuff, output.pos, fp);
         output.pos = 0;
         if (r == 0) break;
         if (ZSTD_isError(r)) {
@@ -1055,7 +1087,8 @@ void datagen(const char *directory, uint64_t target_positions, const char *book_
         }
     }
 
-    fclose(fp);
+    if (fclose(fp) != 0)
+        dg_write_failed = 1;
     free(outBuff);
     ZSTD_freeCStream(cstream);
     free_book();
@@ -1073,4 +1106,9 @@ void datagen(const char *directory, uint64_t target_positions, const char *book_
 
     // Append outcome block to the manifest so the file is a complete record.
     write_manifest_result(manifest_path, total_positions, total_games, wall_ms);
+
+    if (dg_write_failed) {
+        fprintf(stderr, "datagen: FAILED, %s is incomplete\n", filename);
+        exit(1);
+    }
 }

@@ -12,4 +12,4 @@ zstd = "0.13"
 rand = "0.8"
 
 [patch.crates-io]
-sfbinpack = { path = "/home/sebby/sfbinpack-patched" }
+sfbinpack = { path = "../../sfbinpack-patched" }

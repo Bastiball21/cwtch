@@ -1,62 +1,50 @@
 #!/bin/bash
+# Trains until SUPERBATCH, resuming from the newest checkpoint after any crash.
+# Every setting main.rs reads can be set in the environment.
 set -u
 
-cd ~/cwtch/trainer
+cd "$(dirname "$0")/trainer" || exit 1
 
-DATA_PATH="${DATA_PATH:-/mnt/d/Bulk-Data}"
-HIDDEN_SIZE="${HIDDEN_SIZE:-1536}"
-BATCH_SIZE="${BATCH_SIZE:-16384}"
-BATCHES_PER_SUPERBATCH="${BATCHES_PER_SUPERBATCH:-6104}"
-SUPERBATCH="${SUPERBATCH:-600}"
-SAVE_RATE="${SAVE_RATE:-50}"
-TRAIN_THREADS="${TRAIN_THREADS:-24}"
+export DATA_PATH="${DATA_PATH:-/mnt/d/Bulk-Data}"
+export HIDDEN_SIZE="${HIDDEN_SIZE:-1536}"
+export BATCH_SIZE="${BATCH_SIZE:-16384}"
+export BATCHES_PER_SUPERBATCH="${BATCHES_PER_SUPERBATCH:-6104}"
+export SUPERBATCH="${SUPERBATCH:-600}"
+export SAVE_RATE="${SAVE_RATE:-50}"
+export TRAIN_THREADS="${TRAIN_THREADS:-24}"
+export OUTPUT_DIR="${OUTPUT_DIR:-nets}"
+export NET_ID="${NET_ID:-cwtch}"
 
-NETS=~/cwtch/trainer/nets
-LATEST=$(ls -d "$NETS"/cwtch-* 2>/dev/null | sed 's|.*/cwtch-||' | grep -E '^[0-9]+$' | sort -n | tail -1)
+mkdir -p "$OUTPUT_DIR"
+
+latest_saved() {
+  ls -d "$OUTPUT_DIR/$NET_ID"-* 2>/dev/null | sed "s|.*/$NET_ID-||" | grep -E '^[0-9]+$' | sort -n | tail -1
+}
+
+LATEST="$(latest_saved)"
 LATEST="${LATEST:-0}"
 
 while [ "$LATEST" -lt "$SUPERBATCH" ]; do
-    NEXT=$((LATEST + 1))
-    LOG=~/cwtch_train_h${HIDDEN_SIZE}_sb${NEXT}_$(date +%s).log
-    echo "=== Training (H=$HIDDEN_SIZE) superbatch $NEXT -> $SUPERBATCH (log: $LOG) ==="
+  LOG="$OUTPUT_DIR/train_sb$((LATEST + 1))_$(date +%s).log"
+  echo "=== Training $NET_ID (H=$HIDDEN_SIZE) superbatch $((LATEST + 1)) -> $SUPERBATCH (log: $LOG) ==="
 
-    if [ "$LATEST" -gt 0 ] && [ -d "$NETS/cwtch-$LATEST" ]; then
-        LOAD_ARG="$NETS/cwtch-$LATEST"
-    else
-        LOAD_ARG=""
-    fi
+  export START_SUPERBATCH=$((LATEST + 1))
+  if [ "$LATEST" -gt 0 ]; then
+    export LOAD_CHECKPOINT="$OUTPUT_DIR/$NET_ID-$LATEST"
+  else
+    unset LOAD_CHECKPOINT
+  fi
 
-    if [ -n "$LOAD_ARG" ]; then
-        DATA_PATH="$DATA_PATH" \
-        HIDDEN_SIZE="$HIDDEN_SIZE" \
-        LOAD_CHECKPOINT="$LOAD_ARG" \
-        START_SUPERBATCH="$NEXT" \
-        SUPERBATCH="$SUPERBATCH" \
-        BATCH_SIZE="$BATCH_SIZE" \
-        BATCHES_PER_SUPERBATCH="$BATCHES_PER_SUPERBATCH" \
-        TRAIN_THREADS="$TRAIN_THREADS" \
-        SAVE_RATE="$SAVE_RATE" \
-        ./target/release/trainer 2>&1 | tee -a "$LOG"
-    else
-        DATA_PATH="$DATA_PATH" \
-        HIDDEN_SIZE="$HIDDEN_SIZE" \
-        START_SUPERBATCH=1 \
-        SUPERBATCH="$SUPERBATCH" \
-        BATCH_SIZE="$BATCH_SIZE" \
-        BATCHES_PER_SUPERBATCH="$BATCHES_PER_SUPERBATCH" \
-        TRAIN_THREADS="$TRAIN_THREADS" \
-        SAVE_RATE="$SAVE_RATE" \
-        ./target/release/trainer 2>&1 | tee -a "$LOG"
-    fi
+  ./target/release/trainer 2>&1 | tee -a "$LOG"
 
-    NEW=$(ls -d "$NETS"/cwtch-* 2>/dev/null | sed 's|.*/cwtch-||' | grep -E '^[0-9]+$' | sort -n | tail -1)
-    NEW="${NEW:-0}"
-    if [ "$NEW" -le "$LATEST" ]; then
-        echo "=== No progress, sleeping 5m ==="
-        sleep 300
-    else
-        LATEST="$NEW"
-        sleep 10
-    fi
+  NEW="$(latest_saved)"
+  NEW="${NEW:-0}"
+  if [ "$NEW" -le "$LATEST" ]; then
+    echo "=== No progress, retrying in 5 minutes ==="
+    sleep 300
+  else
+    LATEST="$NEW"
+    sleep 10
+  fi
 done
-echo "=== DONE at cwtch-$LATEST ==="
+echo "=== DONE at $NET_ID-$LATEST ==="

@@ -2,7 +2,7 @@
 # Cwtch Makefile
 # ===========================================================================
 
-VERSION   := 7.0
+VERSION   := 7.1
 
 SRC_DIR   := src
 BUILD_DIR := build
@@ -39,8 +39,12 @@ else
 endif
 
 CC        := clang
-CFLAGS    := -Wall -Wextra -O3 -flto $(ARCH_FLAG) -funroll-loops -fno-math-errno -MMD -MP -DBUILD=\"$(VERSION)\"
+BASE_CFLAGS := -Wall -Wextra -O3 -flto $(ARCH_FLAG) -funroll-loops -fno-math-errno -DBUILD=\"$(VERSION)\"
+CFLAGS    := $(BASE_CFLAGS) -MMD -MP
 LDFLAGS   := -flto -lm -lpthread -lzstd
+
+# Linux release binaries are fully static, so they run without libzstd installed.
+RELEASE_LDFLAGS := -flto -static -lm -lpthread -lzstd
 
 # ---------------------------------------------------------------------------
 # Windows cross-compile
@@ -62,9 +66,9 @@ ZSTD_WIN_DIR     := $(HOME)/zstd-mingw
 ZSTD_WIN_SRC_DIR := $(HOME)/zstd-src
 ZSTD_WIN_VER     := v1.5.7
 
-WIN_CFLAGS  := -Wall -Wextra -O3 -flto -march=x86-64 -funroll-loops -fno-math-errno \
-               -MMD -MP -DBUILD=\"$(VERSION)\" \
-               -I$(ZSTD_WIN_DIR)/include
+WIN_BASE_CFLAGS := -Wall -Wextra -O3 -flto -march=x86-64 -funroll-loops -fno-math-errno \
+                   -DBUILD=\"$(VERSION)\" -I$(ZSTD_WIN_DIR)/include
+WIN_CFLAGS  := $(WIN_BASE_CFLAGS) -MMD -MP
 
 # -static links everything statically (self-contained .exe).
 # If the toolchain complains about missing static libgcc, fall back to:
@@ -86,7 +90,6 @@ WIN_DEPS  := $(WIN_OBJS:.o=.d)
 
 # Release
 RELEASE_DIR  := releases
-X86_ARCHES   := x86_64 x86_64_v2 x86_64_v3 x86_64_v4 bmi2
 ARM64_ARCHES := aarch64
 ARM32_ARCHES := armv6 armv7_neon
 
@@ -99,20 +102,24 @@ ARM32_ZSTD_INC_DIR := /opt/arm-zstd/include
 # ===========================================================================
 # Phony targets
 # ===========================================================================
-.PHONY: all win universal universal-win clean rebuild debug \
+.PHONY: all win universal universal-win clean rebuild debug test \
         release release-win release-aarch64 release-arm32 \
         release-all release-everything zstd-win
 
 # ===========================================================================
-# Universal x86_64 builds (single binary with runtime SIMD dispatch)
+# Universal build for this host: on x86-64 one binary dispatches its SIMD at runtime
 # ===========================================================================
 universal:
-	@echo "  CC      universal x86-64 (runtime dispatch: avx512_vnni | avx512bw | avx2 | scalar) -> $(TARGET)"
-	@$(CC) -Wall -Wextra -O3 -flto -march=x86-64 -funroll-loops -fno-math-errno -DBUILD=\"$(VERSION)\" $(SRCS) -o $(TARGET) $(LDFLAGS)
+	@echo "  CC      $(HOST_OS) $(HOST_ARCH) ($(ARCH_FLAG)) -> $(TARGET)"
+	@$(CC) $(BASE_CFLAGS) $(SRCS) -o $(TARGET) $(LDFLAGS)
 
 universal-win:
 	@echo "  CC      universal x86-64 Windows (runtime dispatch: avx512_vnni | avx512bw | avx2 | scalar) -> $(WIN_TARGET)"
-	@$(WIN_CC) -Wall -Wextra -O3 -flto -march=x86-64 -funroll-loops -fno-math-errno -DBUILD=\"$(VERSION)\" -I$(ZSTD_WIN_DIR)/include $(SRCS) -o $(WIN_TARGET) $(WIN_LDFLAGS)
+	@$(WIN_CC) $(WIN_BASE_CFLAGS) $(SRCS) -o $(WIN_TARGET) $(WIN_LDFLAGS)
+
+# Perft, SIMD agreement, bench determinism and UCI behaviour
+test: universal
+	@bin/check $(TARGET)
 
 # ===========================================================================
 # Default build
@@ -126,6 +133,9 @@ $(TARGET): $(OBJS)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	@echo "  CC      $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
+
+# incbin isn't visible to -MMD: a new net must rebuild this object
+$(BUILD_DIR)/net.o: quantised.bin
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
@@ -142,6 +152,8 @@ $(WIN_TARGET): $(WIN_OBJS)
 $(WIN_BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(WIN_BUILD_DIR)
 	@echo "  CC      $< (win)"
 	@$(WIN_CC) $(WIN_CFLAGS) -c $< -o $@
+
+$(WIN_BUILD_DIR)/net.o: quantised.bin
 
 $(WIN_BUILD_DIR):
 	@mkdir -p $(WIN_BUILD_DIR)
@@ -195,8 +207,7 @@ debug:
 clean:
 	@rm -rf $(BUILD_DIR) $(WIN_BUILD_DIR) build-arm build-arm64
 	@rm -f $(TARGET) $(WIN_TARGET) ./cwtch_datagen
-	@rm -f releases/cwtch_$(VERSION)_*
-	@echo "  CLEAN   done"
+	@echo "  CLEAN   done (releases/ left alone)"
 
 rebuild: clean all
 
@@ -207,7 +218,7 @@ release:
 	@mkdir -p $(RELEASE_DIR)
 	@out="$(RELEASE_DIR)/cwtch_$(VERSION)_linux_x86_64" ; \
 	echo "=== Linux Universal x86_64 (runtime dispatch: avx512_vnni | avx512bw | avx2 | scalar) -> $$out ===" ; \
-	$(CC) $(CFLAGS) $(SRCS) -o $$out $(LDFLAGS)
+	$(CC) $(BASE_CFLAGS) $(SRCS) -o $$out $(RELEASE_LDFLAGS)
 	@echo "=== x86_64 Linux release complete ==="
 
 # ===========================================================================
@@ -225,14 +236,14 @@ release-win:
 		echo "  Run: make zstd-win" ; \
 		exit 1 ; \
 	fi
-	@if ! echo '#include <zstd.h>' | $(WIN_CC) $(WIN_CFLAGS) -E -x c - >/dev/null 2>&1; then \
+	@if ! echo '#include <zstd.h>' | $(WIN_CC) $(WIN_BASE_CFLAGS) -E -x c - >/dev/null 2>&1; then \
 		echo "  error: $(WIN_CC) cannot find zstd.h" ; \
 		echo "  Looked in: $(ZSTD_WIN_DIR)/include" ; \
 		exit 1 ; \
 	fi
 	@out="$(RELEASE_DIR)/cwtch_$(VERSION)_windows_x86_64.exe" ; \
 	echo "=== Windows Universal x86_64 (runtime dispatch: avx512_vnni | avx512bw | avx2 | scalar) -> $$out ===" ; \
-	$(WIN_CC) $(WIN_CFLAGS) $(SRCS) -o $$out $(WIN_LDFLAGS)
+	$(WIN_CC) $(WIN_BASE_CFLAGS) $(SRCS) -o $$out $(WIN_LDFLAGS)
 	@echo "=== x86_64 Windows release complete ==="
 
 # ===========================================================================
@@ -249,7 +260,7 @@ release-aarch64:
 		out="$(RELEASE_DIR)/cwtch_$(VERSION)_$$arch" ; \
 		echo "=== aarch64 -> $$out ===" ; \
 		$(ARM_CC_64) -Wall -Wextra -O3 -flto -march=armv8-a -DBUILD=\"$(VERSION)\" \
-			$(SRCS) -o $$out $(LDFLAGS) || exit 1 ; \
+			$(SRCS) -o $$out $(RELEASE_LDFLAGS) || exit 1 ; \
 	done
 	@echo "=== aarch64 release complete ==="
 

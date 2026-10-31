@@ -1,0 +1,61 @@
+#!/bin/bash
+# Engine self-check: perft, SIMD agreement, bench determinism, UCI behaviour.
+set -u
+E="${1:-./cwtch}"
+fail=0
+pass() { echo "  ok    $1"; }
+bad()  { echo "  FAIL  $1"; fail=1; }
+expect() { if eval "$2" >/dev/null 2>&1; then pass "$1"; else bad "$1"; fi; }
+# usage: uci "<lines separated by \n>" "<seconds to keep stdin open>"
+uci() { (printf '%b\n' "$1"; sleep "${2:-0.5}"; echo quit) | timeout 15 "$E" 2>&1; }
+
+echo "perft"
+out=$("$E" pt 5 | tail -1)
+[[ "$out" == "Errors: 0/"* ]] && pass "$out" || bad "$out"
+
+echo "SIMD paths give identical evals"
+ref=""
+for v in scalar avx2 avx512bw avx512_vnni; do
+  [ "$(CWTCH_SIMD=$v "$E" net | grep -c "^simd: $v ")" = 1 ] || { echo "  skip  $v (not on this CPU)"; continue; }
+  sum=$(CWTCH_SIMD=$v "$E" et | tail -1)
+  [ -z "$ref" ] && ref="$sum"
+  [ "$sum" = "$ref" ] && pass "$v: $sum" || bad "$v: $sum, expected $ref"
+done
+
+echo "bench is deterministic"
+a=$("$E" bench 10 | tail -1 | awk '{print $2}')
+b=$("$E" bench 10 | tail -1 | awk '{print $2}')
+[ "$a" = "$b" ] && pass "$a nodes" || bad "$a vs $b nodes"
+
+echo "UCI"
+for i in 1 2 3; do
+  out=$(printf 'go infinite\nstop\n' | timeout 5 "$E" | tail -1)
+  [[ "$out" == bestmove* ]] || { bad "stop right behind go infinite: '$out'"; break; }
+done && pass "stop right behind go infinite"
+out=$(uci 'go infinite' 0.3 | grep -c bestmove)
+[ "$out" = 1 ] && pass "go infinite answers once when stopped" || bad "go infinite gave $out bestmoves"
+out=$(uci 'go movetime 800\nisready' 1.2 | grep -nE 'readyok|bestmove' | head -1)
+[[ "$out" == *readyok* ]] && pass "isready answers during a search" || bad "isready: $out"
+out=$(uci 'position fen 6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1\ngo depth 6')
+[[ "$out" == *"score mate 1 "* && "$out" == *"bestmove a1a8"* ]] && pass "reports score mate" || bad "mate report"
+out=$(uci 'position fen 6k1/5ppp/8/8/8/8/5PPP/r5K1 w - - 0 1\ngo depth 3')
+[[ "$out" == *"bestmove 0000"* ]] && pass "bestmove 0000 when mated" || bad "no legal move"
+out=$(uci 'position startpos\ngo wtime 100 btime 100 winc 2000 binc 2000' 0.5)
+t=$(grep -oE ' time [0-9]+' <<< "$out" | tail -1 | awk '{print $2}')
+[ "${t:-999}" -lt 100 ] && pass "stays inside a 100 ms clock (${t} ms)" || bad "spent ${t:-?} ms of a 100 ms clock"
+for c in 'setoption' 'setoption name Hash' 'setoption name Hash value' 'position' 'position fen' \
+         'position fen 8/8/8/8/8/8/8/8 w - -' 'position fen xyz' 'position startpos moves e2e5' 'go wtime' 'unknowncommand'; do
+  uci "$c" 0.1 >/dev/null; rc=$?
+  [ $rc = 0 ] || bad "'$c' exited $rc"
+done
+pass "malformed commands survive"
+(sleep 1; echo quit) | "$E" >/dev/null &
+sleep 0.6; pid=$!; pid=$(pgrep -n -f "^$E\$" || echo "")
+if [ -n "$pid" ]; then
+  cpu=$(top -b -n1 -p "$pid" | tail -1 | awk '{print int($9)}')
+  [ "${cpu:-100}" -lt 20 ] && pass "idle CPU ${cpu}%" || bad "idle CPU ${cpu}%"
+fi
+wait
+
+[ $fail = 0 ] && echo "all checks passed" || echo "CHECKS FAILED"
+exit $fail

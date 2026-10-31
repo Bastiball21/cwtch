@@ -16,6 +16,8 @@ e2=./cwtch_base
 elo0=0
 elo1=10
 concurrency=15
+# keep this small: a large margin hides engines overrunning their clock
+margin=${MARGIN:-50}
 book=books/UHO_Lichess_4852_v1.epd
 [ -f "$book" ] || book=UHO_Lichess_4852_v1.epd
 
@@ -36,8 +38,8 @@ FASTCHESS="./bin/fastchess"
 "$FASTCHESS" -recover -concurrency $concurrency -rounds 10000 \
   -resign movecount=5 score=600 \
   -draw movenumber=40 movecount=8 score=5 \
-  -engine cmd=$e1 proto=uci tc=$tc timemargin=250 option.Hash=$hash name=$e1name \
-  -engine cmd=$e2 proto=uci tc=$tc timemargin=250 option.Hash=$hash name=$e2name \
+  -engine cmd=$e1 proto=uci tc=$tc timemargin=$margin option.Hash=$hash name=$e1name \
+  -engine cmd=$e2 proto=uci tc=$tc timemargin=$margin option.Hash=$hash name=$e2name \
   -openings file=./$book format=epd order=random -srand $RANDOM \
   -sprt elo0=$elo0 elo1=$elo1 alpha=0.05 beta=0.1 \
   -pgnout file=sprt.pgn
