@@ -267,7 +267,7 @@ bool uci_exec(char *input) {
     clock_t end = clock();
     double secs = (double)(end - start) / CLOCKS_PER_SEC;
     uint64_t nps = secs > 0 ? (uint64_t)(num_nodes / secs) : 0;
-    printf("perft %d: %lu (%.3fs, %lu nps)\n", depth, num_nodes, secs, nps);
+    printf("perft %d: %llu (%.3fs, %llu nps)\n", depth, (unsigned long long)num_nodes, secs, (unsigned long long)nps);
   }
 
   else if (str_eq(cmd, "pt", "")) {
