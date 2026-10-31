@@ -5,7 +5,7 @@
 #include "pos.h"
 #include "move.h"
 
-#define MAX_PLY 64
+#define MAX_PLY 128
 #define MAX_MOVES 256
 
 enum {

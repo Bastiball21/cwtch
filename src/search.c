@@ -24,9 +24,17 @@
 
 _Thread_local int local_node_batch = 0;
 _Thread_local int current_thread_id = 0;
+_Thread_local uint64_t thread_nodes = 0;
+_Thread_local int sel_depth = 0;
 
-void reset_local_nodes(void) {
+static _Thread_local uint64_t root_nodes[64][64];
+
+void search_thread_init(int thread_id) {
+  current_thread_id = thread_id;
   local_node_batch = 0;
+  thread_nodes = 0;
+  sel_depth = 0;
+  memset(root_nodes, 0, sizeof(root_nodes));
 }
 
 void flush_local_nodes(void) {
@@ -34,6 +42,10 @@ void flush_local_nodes(void) {
     atomic_fetch_add_explicit(&time_control.nodes, (uint64_t)local_node_batch, memory_order_relaxed);
     local_node_batch = 0;
   }
+}
+
+uint64_t root_move_nodes(const move_t move) {
+  return root_nodes[(move >> 6) & 0x3F][move & 0x3F];
 }
 
 static int lmr[MAX_PLY][MAX_MOVES];
@@ -81,6 +93,9 @@ int search(const int ply, int depth, int alpha, int beta) {
 
   TimeControl *tc = &time_control;
   local_node_batch++;
+  thread_nodes++;
+  if (ply > sel_depth)
+    sel_depth = ply;
 
   if (local_node_batch >= 1024) {
     atomic_fetch_add_explicit(&time_control.nodes, 1024, memory_order_relaxed);
@@ -95,26 +110,24 @@ int search(const int ply, int depth, int alpha, int beta) {
   if (alpha >= beta)
     return alpha;
 
-  const TT *entry = tt_get(pos);
-  if (!is_pv && !excluded && entry && entry->depth >= depth) {
-    const int tt_flags = entry->flags;
-    const int tt_score = get_adjusted_score(ply, entry->score);
-    if (tt_flags == TT_EXACT || (tt_flags == TT_BETA && tt_score >= beta) || (tt_flags == TT_ALPHA && tt_score <= alpha)) {
-      return tt_score;
-    }
+  TTHit tte;
+  const int tt_hit = tt_probe(pos->hash, &tte);
+  const move_t tt_move = tt_hit ? tte.move : 0;
+  const int tt_depth = tt_hit ? tte.depth : 0;
+  const int tt_bound = tt_hit ? tte.bound : TT_NONE;
+  const int tt_score = tt_hit ? get_adjusted_score(ply, tte.score) : 0;
+
+  if (!is_pv && !excluded && tt_hit && tt_depth >= depth && (tt_bound & (tt_score >= beta ? TT_BETA : TT_ALPHA))) {
+    return tt_score;
   }
 
-  const move_t tt_move = entry ? entry->move : 0;
-  const int tt_depth = entry ? entry->depth : 0;
-  const int tt_flags = entry ? entry->flags : 0;
-  const int tt_score = entry ? get_adjusted_score(ply, entry->score) : 0;
-
-  if (!in_check && !excluded && depth >= 4 && (!tt_move || (entry && entry->depth + 4 < depth))) {
+  if (!in_check && !excluded && depth >= 4 && (!tt_move || tt_depth + 4 < depth)) {
     depth--;
   }
 
   lazy_update_accs(node);
-  const int16_t ev = correct_eval(pos, net_eval(node));
+  const int raw_ev = (tt_hit && tte.eval != TT_NO_EVAL) ? tte.eval : net_eval(node);
+  const int16_t ev = correct_eval(pos, raw_ev);
   node->ev = ev;
 
   const int improving = !in_check && (ply < 2 || ev > nodes[ply-2].ev);
@@ -194,7 +207,7 @@ int search(const int ply, int depth, int alpha, int beta) {
       continue;
 
     int extension = 0;
-    if (!is_root && !excluded && depth >= 8 && move == tt_move && tt_depth + 4 >= depth && tt_flags != TT_ALPHA && tt_score > -MATEISH && tt_score < MATEISH) {
+    if (!is_root && !excluded && depth >= 8 && move == tt_move && tt_depth + 4 >= depth && (tt_bound & TT_BETA) && tt_score > -MATEISH && tt_score < MATEISH) {
 
       const int s_beta = tt_score - 4 * depth;
       const int s_depth = (depth - 1) / 2;
@@ -240,6 +253,7 @@ int search(const int ply, int depth, int alpha, int beta) {
     node->played[played++] = move;
 
     const int new_depth = depth - 1 + extension;
+    const uint64_t nodes_before = thread_nodes;
 
     if (extension == 2)
       node->dextensions++;
@@ -253,7 +267,7 @@ int search(const int ply, int depth, int alpha, int beta) {
         int d = new_depth;
 
         if (depth >= 3 && played >= 3 && is_quiet && !in_check) {
-          int reduction = lmr[depth][played];
+          int reduction = lmr[depth < MAX_PLY ? depth : MAX_PLY - 1][played];
           reduction -= hist / 8000;
           d -= reduction;
           d = (d < 1) ? 1 : d;
@@ -271,7 +285,7 @@ int search(const int ply, int depth, int alpha, int beta) {
       int d = new_depth;
 
       if (depth >= 3 && played >= 2 && is_quiet && !in_check) {
-        int reduction = lmr[depth][played] + 1;
+        int reduction = lmr[depth < MAX_PLY ? depth : MAX_PLY - 1][played] + 1;
         reduction -= hist / 8000;
         d -= reduction;
         d = (d < 1) ? 1 : d;
@@ -286,6 +300,9 @@ int search(const int ply, int depth, int alpha, int beta) {
 
     if (extension == 2)
       node->dextensions--;  
+
+    if (is_root)
+      root_nodes[from][to] += thread_nodes - nodes_before;
 
     if (tc->finished)
       return 0;
@@ -344,7 +361,7 @@ int search(const int ply, int depth, int alpha, int beta) {
           if (!excluded && !in_check && best_score < MATEISH && best_score > ev && !(best_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE)))
             update_corrhist(pos, depth, best_score - ev);
           if (!excluded)
-            tt_put(pos, TT_BETA, depth, put_adjusted_score(ply, best_score), best_move);
+            tt_put(pos->hash, TT_BETA, depth, put_adjusted_score(ply, best_score), raw_ev, best_move, is_pv);
           return score;
         }
       }
@@ -359,7 +376,7 @@ int search(const int ply, int depth, int alpha, int beta) {
     update_corrhist(pos, depth, best_score - ev);
 
   if (!excluded)
-    tt_put(pos, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, depth, put_adjusted_score(ply, best_score), best_move);
+    tt_put(pos->hash, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, depth, put_adjusted_score(ply, best_score), raw_ev, best_move, is_pv);
 
   return best_score;
 

@@ -39,8 +39,31 @@ int qsearch(const int ply, int alpha, const int beta) {
   const int stm_king_idx = piece_index(KING, stm);
   const int in_check = 0; //is_attacked(pos, bsf(pos->all[stm_king_idx]), opp); // for minor move gen captures optimisation only
 
+  TimeControl *tc = &time_control;
+  local_node_batch++;
+  thread_nodes++;
+  if (ply > sel_depth)
+    sel_depth = ply;
+
+  if (local_node_batch >= 1024) {
+    atomic_fetch_add_explicit(&time_control.nodes, 1024, memory_order_relaxed);
+    local_node_batch = 0;
+    check_tc_nodes();
+  }
+
+  TTHit tte;
+  const int tt_hit = tt_probe(pos->hash, &tte);
+
+  if (tt_hit) {
+    const int tt_score = get_adjusted_score(ply, tte.score);
+    if (tte.bound & (tt_score >= beta ? TT_BETA : (tt_score <= alpha ? TT_ALPHA : TT_NONE))) {
+      return tt_score;
+    }
+  }
+
   lazy_update_accs(node);
-  int stand_pat = correct_eval(pos, net_eval(node));
+  const int raw_ev = (tt_hit && tte.eval != TT_NO_EVAL) ? tte.eval : net_eval(node);
+  int stand_pat = correct_eval(pos, raw_ev);
 
   if (stand_pat >= beta) {
     return stand_pat;
@@ -49,25 +72,7 @@ int qsearch(const int ply, int alpha, const int beta) {
     alpha = stand_pat;
   }
 
-  TimeControl *tc = &time_control;
-  local_node_batch++;
-
-  if (local_node_batch >= 1024) {
-    atomic_fetch_add_explicit(&time_control.nodes, 1024, memory_order_relaxed);
-    local_node_batch = 0;
-    check_tc_nodes();
-  }
-
-  const TT *entry = tt_get(pos);
-  if (entry) {
-    const int tt_flags = entry->flags;
-    const int tt_score = get_adjusted_score(ply, entry->score);
-    if (tt_flags == TT_EXACT || (tt_flags == TT_BETA && tt_score >= beta) || (tt_flags == TT_ALPHA && tt_score <= alpha)) {
-      return tt_score;
-    }
-  }
-
-  const move_t tt_move = entry && (entry->move & MOVE_FLAG_CAPTURE) ? entry->move : 0;
+  const move_t tt_move = tt_hit && (tte.move & MOVE_FLAG_CAPTURE) ? tte.move : 0;
   Node *next_node = &nodes[ply + 1];
   Position *next_pos = &next_node->pos;
   move_t move;
@@ -107,14 +112,14 @@ int qsearch(const int ply, int alpha, const int beta) {
       if (score > alpha) {
         alpha = score;
         if (score >= beta) {
-          tt_put(pos, TT_BETA, 0, put_adjusted_score(ply, best_score), best_move); 
+          tt_put(pos->hash, TT_BETA, 0, put_adjusted_score(ply, best_score), raw_ev, best_move, 0); 
           return score;
         }
       }
     }
   }
 
-  tt_put(pos, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, 0, put_adjusted_score(ply, best_score), best_move); 
+  tt_put(pos->hash, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, 0, put_adjusted_score(ply, best_score), raw_ev, best_move, 0); 
 
   return best_score;
 

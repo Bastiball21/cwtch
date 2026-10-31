@@ -14,15 +14,14 @@
 #include "position.h"
 #include "datagen.h"
 
-#define INPUT_BUFFER_SIZE 8192
-
 int main(int argc, char *argv[]) {
 
   setbuf(stdin, NULL);
   setbuf(stdout, NULL);
 
   init_attacks();
-  init_weights();
+  if (init_weights() != 0)
+    return 1;
   init_zob();
   init_lmr();
   init_line_masks();
@@ -31,18 +30,16 @@ int main(int argc, char *argv[]) {
 
   // If command-line arguments provided, execute them as a single command and exit
   if (argc > 1) {
-    char cmd[INPUT_BUFFER_SIZE];
-    cmd[0] = '\0';
-    for (int i = 1; i < argc; i++) {
-      strcat(cmd, argv[i]);
-      if (i < argc - 1) strcat(cmd, " ");
-    }
+    static char cmd[INPUT_BUF_SIZE];
+    size_t used = 0;
+    for (int i = 1; i < argc && used < sizeof(cmd); i++)
+      used += (size_t)snprintf(cmd + used, sizeof(cmd) - used, "%s%s", i > 1 ? " " : "", argv[i]);
     uci_exec(cmd);
     return 0;
   }
 
   // Otherwise run interactive loop
-  char input[INPUT_BUFFER_SIZE];
+  static char input[INPUT_BUF_SIZE];
 
   input_init();
 

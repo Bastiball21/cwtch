@@ -1,5 +1,6 @@
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include "nodes.h"
 #include "makemove.h"
@@ -7,6 +8,41 @@
 #include "net.h"
 #include "hh.h"
 #include "builtins.h"
+
+int fen_board_valid(const char *board_fen) {
+
+  int rank = 7;
+  int file = 0;
+  int kings[2] = {0, 0};
+
+  for (const char *p = board_fen; *p; ++p) {
+
+    if (*p == '/') {
+      if (file != 8 || rank == 0)
+        return 0;
+      rank--;
+      file = 0;
+    }
+    else if (*p >= '1' && *p <= '8') {
+      file += *p - '0';
+    }
+    else if (strchr("pnbrqkPNBRQK", *p)) {
+      if (*p == 'K') kings[WHITE]++;
+      if (*p == 'k') kings[BLACK]++;
+      file++;
+    }
+    else {
+      return 0;
+    }
+
+    if (file > 8)
+      return 0;
+
+  }
+
+  return rank == 0 && file == 8 && kings[WHITE] == 1 && kings[BLACK] == 1;
+
+}
 
 void position(Node *node, const char *board_fen, const char *stm_str, const char *rights_str, const char *ep_str, int hmc, int num_uci_moves, char **uci_moves) {
 
@@ -62,7 +98,7 @@ void position(Node *node, const char *board_fen, const char *stm_str, const char
   
   pos->rights = 0;
 
-  extern int is_chess960; // Pull in the global flag from uci.c
+  extern int is_chess960;
   pos->is_chess960 = is_chess960;
 
   // Initialize rook squares to default A/H files
@@ -146,7 +182,7 @@ void position(Node *node, const char *board_fen, const char *stm_str, const char
   
   // ep
 
-  if (ep_str[0] != '-') {
+  if (ep_str[0] >= 'a' && ep_str[0] <= 'h' && (ep_str[1] == '3' || ep_str[1] == '6')) {
 
     int file = ep_str[0] - 'a';
     int rank = ep_str[1] - '1';
@@ -163,7 +199,7 @@ void position(Node *node, const char *board_fen, const char *stm_str, const char
   }
 
   // hmc
-  pos->hmc = hmc;
+  pos->hmc = hmc < 0 ? 0 : (hmc > 255 ? 255 : hmc);
 
   pos->hash = rebuild_hash(pos);
   net_slow_rebuild_accs(node);
@@ -177,7 +213,10 @@ void position(Node *node, const char *board_fen, const char *stm_str, const char
 
   // play uci moves
   for (int m = 0; m < num_uci_moves; m++) {
-    play_move(node, uci_moves[m]);
+    if (!play_move(node, uci_moves[m])) {
+      printf("info string illegal move %s, ignoring the rest of the line\n", uci_moves[m]);
+      break;
+    }
     hh_push(pos->hash);
   }
 

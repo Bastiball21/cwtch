@@ -14,8 +14,7 @@ releases/
 OG-net/
 bin/fastchess
 trainer/target/
-trainer/nets/
-trainer/nets_4096_old/
+trainer/nets*/
 *.zip
 *:Zone.Identifier
 -.d

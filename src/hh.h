@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define MAX_HH 1024
+#define MAX_HH 4096
 
 void hh_reset(void);
 void hh_push(uint64_t hash);

@@ -694,8 +694,8 @@ int init_weights(void) {
 
   size_t bytes = (size_t)cwtch_weights_size;
   if (bytes != NET_FILE_BYTES) {
-    printf("info string embedded weights %llu bytes, expected %llu\n",
-           (unsigned long long)bytes, (unsigned long long)NET_FILE_BYTES);
+    fprintf(stderr, "fatal: embedded net is %llu bytes, this build needs %llu (H1=%d, input buckets=%d)\n",
+            (unsigned long long)bytes, (unsigned long long)NET_FILE_BYTES, NET_H1_SIZE, NET_I_BUCKETS);
     return 1;
   }
   unpack_weights((const int16_t *)cwtch_weights_data);

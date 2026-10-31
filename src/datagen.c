@@ -713,7 +713,7 @@ static int play_game(FILE *fp, ZSTD_CStream* cstream, void* outBuff, size_t outB
             break;
         }
 
-        init_tc(0, 0, 0, 0, DG_SEARCH_NODES, 0, 0, 0);
+        init_tc(0, 0, 0, 0, DG_SEARCH_NODES, 0, 0, 0, 0);
         time_control.best_move = 0;
         time_control.best_score = 0;
         go(1);

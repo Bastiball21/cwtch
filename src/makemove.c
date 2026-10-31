@@ -194,29 +194,39 @@ void apply_move(Node *node, const move_t move) {
   update_accs(node, scratch);
 }
 
-void play_move(Node *node, char *uci_move) {
+int play_move(Node *node, const char *uci_move) {
 
   char buf[6];
 
   Position *pos = &node->pos;
   const int stm = pos->stm;
   const int opp = stm ^ 1;
-  const int stm_king_sq = piece_index(KING, stm);
-  const int in_check = is_attacked(pos, bsf(pos->all[stm_king_sq]), opp);
-  move_t move ;
+  const int stm_king_idx = piece_index(KING, stm);
+  const int in_check = is_attacked(pos, bsf(pos->all[stm_king_idx]), opp);
+  move_t move;
+  Node scratch;
 
   init_next_search_move(node, in_check, 0);
 
   while ((move = get_next_search_move(node))) {
 
     format_move(move, buf);
-    if (!strcmp(uci_move, buf)) {
-      apply_move(node, move);
-      return;
-    }
+
+    if (strcmp(uci_move, buf) != 0)
+      continue;
+
+    pos_copy(pos, &scratch.pos);
+    make_move(&scratch, move);
+
+    if (is_attacked(&scratch.pos, bsf(scratch.pos.all[stm_king_idx]), opp))
+      return 0;
+
+    apply_move(node, move);
+    return 1;
+
   }
 
-  return;
+  return 0;
 
 }
 
