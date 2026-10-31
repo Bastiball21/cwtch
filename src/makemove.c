@@ -230,6 +230,28 @@ int play_move(Node *node, const char *uci_move) {
 
 }
 
+move_t first_legal_move(Node *node) {
+
+  const Position *pos = &node->pos;
+  const int stm = pos->stm;
+  const int opp = stm ^ 1;
+  const int king_idx = piece_index(KING, stm);
+  Node scratch;
+  move_t move;
+
+  init_next_search_move(node, is_attacked(pos, bsf(pos->all[king_idx]), opp), 0);
+
+  while ((move = get_next_search_move(node))) {
+    pos_copy(pos, &scratch.pos);
+    make_move(&scratch, move);
+    if (!is_attacked(&scratch.pos, bsf(scratch.pos.all[king_idx]), opp))
+      return move;
+  }
+
+  return 0;
+
+}
+
 void make_null_move(Position *pos) {
 
   int ep = pos->ep;

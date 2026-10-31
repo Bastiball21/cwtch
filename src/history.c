@@ -7,6 +7,7 @@
 #include "move.h"
 #include "nodes.h"
 
+int16_t main_history[2][64][64];
 int16_t piece_to_history[12][64];
 int16_t cont_history[12][64][12][64];
 int16_t capture_history[12][64][6];
@@ -19,28 +20,21 @@ static void apply_gravity(int16_t *entry, const int bonus) {
 
 }
 
-void update_piece_to_history(const Position *pos, const move_t move, int bonus) {
+void update_quiet_histories(Node *node, const Position *pos, const move_t move, int bonus) {
 
   const int from = (move >> 6) & 0x3F;
   const int to = move & 0x3F;
   const int piece = pos->board[from];
 
+  apply_gravity(&main_history[pos->stm][from][to], bonus);
   apply_gravity(&piece_to_history[piece][to], bonus);
 
-}
-
-void update_cont_history(Node *node, const Position *pos, const move_t move, int bonus) {
-
-  int16_t (*const cont)[64] = node->cont_entry;
-
-  if (!cont)
-    return;
-
-  const int from = (move >> 6) & 0x3F;
-  const int to = move & 0x3F;
-  const int piece = pos->board[from];
-
-  apply_gravity(&cont[piece][to], bonus);
+  if (node->cont_entry)
+    apply_gravity(&node->cont_entry[piece][to], bonus);
+  if (node->cont2)
+    apply_gravity(&node->cont2[piece][to], bonus);
+  if (node->cont4)
+    apply_gravity(&node->cont4[piece][to], bonus);
 
 }
 

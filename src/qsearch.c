@@ -38,16 +38,7 @@ int qsearch(const int ply, int alpha, const int beta) {
   const int is_pv = beta - alpha != 1;
 
   TimeControl *tc = &time_control;
-  local_node_batch++;
-  thread_nodes++;
-  if (ply > sel_depth)
-    sel_depth = ply;
-
-  if (local_node_batch >= 1024) {
-    atomic_fetch_add_explicit(&time_control.nodes, 1024, memory_order_relaxed);
-    local_node_batch = 0;
-    check_tc_nodes();
-  }
+  count_node(ply);
 
   TTHit tte;
   const int tt_hit = tt_probe(pos->hash, &tte);
@@ -104,6 +95,9 @@ int qsearch(const int ply, int alpha, const int beta) {
   int played = 0;
   int quiet_evasions = 0;
 
+  node->cont2 = NULL;
+  node->cont4 = NULL;
+
   init_next_qsearch_move(node, in_check, tt_move);
 
   while ((move = get_next_qsearch_move(node))) {
@@ -136,6 +130,8 @@ int qsearch(const int ply, int alpha, const int beta) {
       continue;
 
     next_node->accs_dirty = 1;
+    next_node->cont_entry = NULL;
+    next_node->prev_piece = EMPTY;
     played++;
     if (is_quiet)
       quiet_evasions++;

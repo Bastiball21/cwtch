@@ -17,7 +17,9 @@ enum {
   STAGE_DONE
 };
 
-#define COUNTERMOVE 32766
+// Far above any history sum, so these two are tried first among the quiets.
+#define KILLER_RANK (1 << 20)
+#define COUNTERMOVE_RANK (1 << 19)
 
 static inline int is_underpromotion(const move_t move) {
   return (move & MOVE_FLAG_PROMOTE) && ((move >> 12) & 7) != QUEEN;
@@ -69,7 +71,7 @@ static void rank_quiets(Node *node) {
   const move_t *moves = node->moves;
   const move_t killer = node->killer;
   int32_t *ranks = node->ranks;
-  int16_t (*const cont)[64] = node->cont_entry;
+  const int stm = node->pos.stm;
   const int n = node->num_moves;
 
   move_t countermove = 0;
@@ -79,19 +81,15 @@ static void rank_quiets(Node *node) {
 
   for (int i=0; i < n; i++) {
     const move_t m = moves[i];
+    const int from = (m >> 6) & 0x3F;
+    const int to = m & 0x3F;
 
-    if (m == killer) {
-      ranks[i] = KILLER;
-    }
-    else if (m == countermove && countermove != 0) {
-      ranks[i] = COUNTERMOVE;
-    }
-    else {
-      const int from = (m >> 6) & 0x3F;
-      const int to = m & 0x3F;
-      const int piece = board[from];
-      ranks[i] = cont ? (piece_to_history[piece][to] + cont[piece][to]) / 2 : piece_to_history[piece][to];
-    }
+    ranks[i] = quiet_history(node, stm, board[from], from, to);
+
+    if (m == killer)
+      ranks[i] += KILLER_RANK;
+    else if (m == countermove)
+      ranks[i] += COUNTERMOVE_RANK;
   }
 }
 
@@ -200,6 +198,10 @@ move_t get_next_search_move(Node *node) {
     default:
       return 0;
   }
+}
+
+int is_bad_noisy_stage(const Node *node) {
+  return node->stage >= STAGE_BAD_NOISY;
 }
 
 void init_next_qsearch_move(Node *node, const int in_check, const move_t tt_move) {

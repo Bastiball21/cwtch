@@ -44,7 +44,9 @@ typedef struct {
   int stage;
   int16_t ev;  // static eval
   move_t killer;
-  int16_t (*cont_entry)[64];  // NULL at root and after null move
+  int16_t (*cont_entry)[64];  // history after the previous move; NULL at root and after null move
+  int16_t (*cont2)[64];       // ... after the move 2 plies back
+  int16_t (*cont4)[64];       // ... after the move 4 plies back
 
   // move that led to this node, for the countermove table
   int prev_piece;

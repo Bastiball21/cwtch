@@ -10,6 +10,8 @@ void clear_nodes(void) {
 
     node->killer = 0;
     node->cont_entry = NULL;
+    node->cont2 = NULL;
+    node->cont4 = NULL;
     node->excluded_move = 0;
     node->dextensions = 0;
     node->ev = 0;

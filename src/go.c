@@ -8,7 +8,6 @@
 #include "go.h"
 #include "hh.h"
 #include "history.h"
-#include "iterate.h"
 #include "makemove.h"
 #include "report.h"
 #include "nodes.h"
@@ -45,26 +44,30 @@ void* search_worker(void* arg) {
   for (int depth = 1; depth <= tc->max_depth; depth++) {
     alpha = -INF;
     beta  = INF;
-    delta = 10;
+    delta = 12 + (score * score) / 16384;
 
     if (depth >= 4) {
-      alpha = score - delta;
-      beta  = score + delta;
+      alpha = score - delta > -INF ? score - delta : -INF;
+      beta  = score + delta < INF ? score + delta : INF;
     }
 
     while (1) {
-      score = search(0, depth, alpha, beta);
+      score = search(0, depth, alpha, beta, 0);
 
       if (tc->finished) break;
 
-      if (score <= alpha) alpha = score - delta;
-      else if (score >= beta) beta = score + delta;
-      else break;
+      if (score <= alpha) {
+        beta = (alpha + beta) / 2;
+        alpha = score - delta > -INF ? score - delta : -INF;
+      }
+      else if (score >= beta) {
+        beta = score + delta < INF ? score + delta : INF;
+      }
+      else {
+        break;
+      }
 
-      delta += delta;
-
-      if (alpha < -INF) alpha = -INF;
-      if (beta > INF) beta = INF;
+      delta += delta / 2;
     }
 
     flush_local_nodes();
@@ -107,28 +110,6 @@ void* search_worker(void* arg) {
   return NULL;
 }
 
-// A search can be stopped before it finishes looking at its first move.
-static move_t first_legal_root_move(void) {
-  Node *node = &nodes[0];
-  const Position *pos = &node->pos;
-  const int stm = pos->stm;
-  const int opp = stm ^ 1;
-  const int king_idx = piece_index(KING, stm);
-  Node scratch;
-  move_t move;
-
-  init_next_search_move(node, is_attacked(pos, bsf(pos->all[king_idx]), opp), 0);
-
-  while ((move = get_next_search_move(node))) {
-    pos_copy(pos, &scratch.pos);
-    make_move(&scratch, move);
-    if (!is_attacked(&scratch.pos, bsf(scratch.pos.all[king_idx]), opp))
-      return move;
-  }
-
-  return 0;
-}
-
 void go(int silent) {
   pthread_t threads[256];
   int started[256] = {0};
@@ -148,8 +129,9 @@ void go(int silent) {
       pthread_join(threads[i], NULL);
   }
 
+  // a search can be stopped before it finishes looking at its first move
   if (!time_control.best_move)
-    time_control.best_move = first_legal_root_move();
+    time_control.best_move = first_legal_move(&nodes[0]);
 
   if (!silent) {
     if (time_control.best_move) {
