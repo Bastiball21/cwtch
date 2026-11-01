@@ -214,7 +214,7 @@ At 8+0.08 on this search, a 512 net scored about 23 Elo below a 1536 net with th
 
 ### Fine-Tuning
 
-Continuing a finished net at a low learning rate is the cheapest gain available: 50 superbatches, about an hour, took `cwtch-600` to +39 +/- 19 Elo at equal nodes.
+Continuing a finished net at a low learning rate is the cheapest gain available: 50 superbatches, about an hour, took `cwtch-600` to +39 +/- 19 Elo at equal nodes and +51 +/- 18 at 8+0.08. This is the net in the repository. The same fine-tune with `TACTICAL_FILTER=1` scored -60 +/- 25 at equal nodes.
 
 ```
 cd trainer
