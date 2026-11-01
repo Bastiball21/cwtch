@@ -825,12 +825,12 @@ fn main() {
     let train_threads          = get_env_usize("TRAIN_THREADS", 24);
     let initial_lr             = get_env_f32("LEARNING_RATE", 0.001);
     let warmup_batches         = get_env_usize("WARMUP_BATCHES", 200);
-    let score_filter           = get_env_i32("SCORE_FILTER", 10000);
-    let tactical_filter        = get_env_i32("TACTICAL_FILTER", 1) != 0;
+    let score_filter           = get_env_i32("SCORE_FILTER", 1500);
+    let tactical_filter        = get_env_i32("TACTICAL_FILTER", 0) != 0;
     let filter                 = Filter { max_score: score_filter, tactical: tactical_filter };
     let buffer_mb              = get_env_usize("BUFFER_MB", 4096);
     let vf_fraction            = get_env_f32("VF_FRACTION", 0.5).clamp(0.0, 1.0) as f64;
-    let sf_score_mult          = get_env_f32("SF_SCORE_MULT", 1.0);
+    let sf_score_mult          = get_env_f32("SF_SCORE_MULT", 0.87);
     let vf_workers             = get_env_usize("VF_WORKERS", 6).max(1);
     let vf_streams             = get_env_usize("VF_STREAMS_PER_WORKER", 12).max(1);
     let sf_workers             = get_env_usize("SF_WORKERS", 6).max(1);

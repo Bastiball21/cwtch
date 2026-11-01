@@ -129,7 +129,7 @@ Datagen filters as it plays:
 
 Filtered positions keep their move, so the trainer can replay the game, but carry a sentinel score and are never trained on.
 
-The trainer filters again, so the rule can change without regenerating data: it drops positions whose best move is a capture, en passant or promotion, positions in check, and scores above `SCORE_FILTER`.
+The trainer filters again, so the rule can change without regenerating data: it drops positions in check and scores above `SCORE_FILTER`. `TACTICAL_FILTER=1` also drops positions whose best move is a capture, en passant or promotion, but read [Choosing a Recipe](#choosing-a-recipe) first.
 
 ## Training
 
@@ -159,9 +159,10 @@ git -C sfbinpack-patched apply ../cwtch/trainer/patches/sfbinpack.patch
 
 - `DATA_PATH` (default `/mnt/d/Bulk-Data`) - directory containing `.vf.zst` / `.binpack` files.
 - `VF_FRACTION` (default 0.5) - share of every shuffle buffer taken from self-play; the rest comes from binpacks. Set to 1.0 for self-play only.
-- `SF_SCORE_MULT` (default 1.0) - multiplier on binpack scores, to match the self-play score scale.
+- `SF_SCORE_MULT` (default 0.87) - multiplier on binpack scores, to match the self-play score scale.
 - `BUFFER_MB` (default 4096) - shuffle buffer size. Two buffers exist at once.
-- `SCORE_FILTER` (default 10000) - drop positions with a larger absolute score.
+- `SCORE_FILTER` (default 1500) - drop positions with a larger absolute score.
+- `TACTICAL_FILTER` (default 0) - set to 1 to drop positions whose best move is tactical.
 - `HIDDEN_SIZE` (default 1536) - hidden layer size, must match `NET_H1_SIZE` in the engine.
 - `BATCH_SIZE` (default 16384), `BATCHES_PER_SUPERBATCH` (default 6104), `SUPERBATCH` (default 600), `SAVE_RATE` (default 50).
 - `LEARNING_RATE` (default 0.001), `WARMUP_BATCHES` (default 200), `WDL_VALUE` (default 0.4).
@@ -186,7 +187,7 @@ Training quality depends heavily on what's in each batch, so the loader streams 
 
 ### Checking Score Scales
 
-`DATA_STATS=<positions> ./target/release/trainer` fits, per source, the scale at which `sigmoid(score / scale)` best predicts the game result, and prints how many positions the filter keeps. Run this before mixing a new data source: on the current data self-play fits about 285 and binpacks about 327, so `SF_SCORE_MULT=0.87` brings them together.
+`DATA_STATS=<positions> ./target/release/trainer` fits, per source, the scale at which `sigmoid(score / scale)` best predicts the game result, and prints how many positions the filter keeps. Run this before mixing a new data source: on the current data self-play fits about 285 and binpacks about 327, which is where the default `SF_SCORE_MULT` of 0.87 comes from.
 
 ### Model Architecture
 
@@ -196,6 +197,29 @@ Training quality depends heavily on what's in each batch, so the loader streams 
 - Quantization: QA=255, QB=64, scale=400.
 
 The saved network is written to the `nets/` directory in a format compatible with the engine (`quantised.bin`). `bullet_lib` stores `l0w` in column-major layout (`[12288][1536]`), which directly matches the engine's input-major accumulator layout without transposition.
+
+### Choosing a Recipe
+
+These were measured with the current search, at equal nodes, between nets that each trained for 100 superbatches on this repository's data:
+
+| Change | Elo |
+|---|---|
+| `TACTICAL_FILTER=1` with `SCORE_FILTER=10000`, against unfiltered with 1500 | about -200 |
+| `VF_FRACTION=0.5` against `VF_FRACTION=0.1` | +42 +/- 20 |
+| Current loader at 50/50 against the old file-at-a-time loader | +24 +/- 21 |
+
+A tactically filtered net never sees a position with a capture available, so it misjudges them badly: after a queen is taken but can be recaptured, a filtered net reads about -1600 where an unfiltered one reads about -600. This search prunes on static eval at nodes where captures are still available, so unfiltered nets play far better with it. 6.5's net was filtered, and scores 235 Elo below `cwtch-600` on this search. The filter's effect depends on the pruning, so retest it if pruning changes.
+
+At 8+0.08 on this search, a 512 net scored about 23 Elo below a 1536 net with the same training. The old 4096 `cwtch-900` net scored -102 +/- 26 against 6.5, about 290 below `cwtch-600`, but it came from the old loader with half the batch size, so that isn't a fair test of the size.
+
+### Fine-Tuning
+
+Continuing a finished net at a low learning rate is the cheapest gain available: 50 superbatches, about an hour, took `cwtch-600` to +39 +/- 19 Elo at equal nodes.
+
+```
+cd trainer
+LOAD_CHECKPOINT=nets/cwtch-600 OUTPUT_DIR=nets_ft NET_ID=ft SUPERBATCH=50 LEARNING_RATE=0.0001 ./target/release/trainer
+```
 
 ### Evaluating a Net
 
@@ -227,6 +251,7 @@ Castling rights are stored using Shredder-FEN (file letters), and castling moves
 
 - Search: parameter tuning with SPSA, tablebases, threat-aware history, upcoming-repetition detection.
 - Lazy SMP tuning: a thread pool, and per-thread histories.
+- Nets: a longer fine-tune, and pruning retuned for tactically filtered nets.
 
 ## Acknowledgements
 
