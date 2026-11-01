@@ -2,6 +2,19 @@
 
 Cwtch is a UCI chess engine written in C. It includes a self-play data generation tool and integrates with the `bullet` trainer to produce neural networks for evaluation. This document describes the full workflow: building, generating training data, training a network, and using it in the engine.
 
+## Strength
+
+Cwtch 7.1 against 6.5, one thread per engine, on the `UHO_Lichess_4852_v1` book:
+
+| Test | Time control | Games | Elo |
+|---|---|---|---|
+| SPRT, passed | 8+0.08 | 192 | +229.2 ± 31.5 |
+| SPRT, passed | 60+0.6 | 190 | +235.2 ± 25.8 |
+| Fixed-length estimate | 8+0.08 | 1000 | +227.6 ± 15.6 |
+| Fixed-length estimate | 60+0.6 | 400 | +226.3 ± 20.1 |
+
+These compare two versions of the same engine, which usually overstates the gain against other engines. 7.1 hasn't been tested on a rating list yet. [CHANGELOG.md](CHANGELOG.md) has the settings, how the gain was built, and what changed in each version.
+
 ## Build
 
 ### Requirements
@@ -245,7 +258,7 @@ Castling rights are stored using Shredder-FEN (file letters), and castling moves
 
 ## Testing
 
-`bin/sprt [stc|ltc]` plays `./cwtch_test` against `./cwtch_base` with SPRT bounds [0, 10]. `MARGIN` sets fastchess's time margin in milliseconds (default 50). Keep it small, because a large margin hides engines overrunning their clock.
+`bin/sprt [stc|ltc]` plays `./cwtch_test` against `./cwtch_base` with SPRT bounds [0, 10] in normalized Elo. It deletes any `sprt.pgn` in the directory it runs from. `MARGIN` sets fastchess's time margin in milliseconds (default 50). Keep it small, because a large margin hides engines overrunning their clock.
 
 ## Future Improvements
 
