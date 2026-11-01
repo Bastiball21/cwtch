@@ -32,8 +32,14 @@ INCBIN(weights, NET_WEIGHTS_PATH);
 // Fast inference relies on incremental accumulator updates (2-4 rows of 3 KiB per move)
 // and the Finny table below to refresh king-bucket transitions via bitboard diffs.
 // Accumulator updates touch this table all over, so 4 KB pages would miss the TLB
-// constantly: aligned for huge pages, requested in unpack_weights().
-static _Alignas(1 << 21) int16_t net_h1_w[NET_L0_SIZE];
+// constantly: aligned for huge pages, requested in unpack_weights(). Windows
+// executables can't align a section beyond 8 KB, and don't ask for huge pages here.
+#ifdef _WIN32
+#define NET_L0_ALIGN 4096
+#else
+#define NET_L0_ALIGN (1 << 21)
+#endif
+static _Alignas(NET_L0_ALIGN) int16_t net_h1_w[NET_L0_SIZE];
 static _Alignas(64) int16_t net_h1_b[NET_H1_SIZE];
 static _Alignas(64) int16_t net_o_w [NET_O_BUCKETS * NET_H1_SIZE * 2];
 static int32_t net_o_b [NET_O_BUCKETS];
