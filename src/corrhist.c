@@ -10,14 +10,12 @@
 // and the eval is nudged by the weighted sum of what they remember.
 
 static int16_t pawn_corr[2][CORR_SIZE];
-static int16_t minor_corr[2][CORR_SIZE];
 static int16_t major_corr[2][CORR_SIZE];
 static int16_t nonpawn_corr[2][2][CORR_SIZE];  // [stm][colour]
 static int16_t cont_corr[2][12][64];           // [stm][previous piece][previous to]
 
 void clear_corrhist(void) {
   memset(pawn_corr, 0, sizeof(pawn_corr));
-  memset(minor_corr, 0, sizeof(minor_corr));
   memset(major_corr, 0, sizeof(major_corr));
   memset(nonpawn_corr, 0, sizeof(nonpawn_corr));
   memset(cont_corr, 0, sizeof(cont_corr));
@@ -42,7 +40,6 @@ static inline uint64_t key2(const uint64_t a, const uint64_t b) {
 
 typedef struct {
   int16_t *pawn;
-  int16_t *minor;
   int16_t *major;
   int16_t *nonpawn[2];
   int16_t *cont;  // NULL at the root and after a null move
@@ -55,11 +52,9 @@ static inline void find_entries(const Node *node, CorrEntries *e) {
   const int stm = pos->stm;
 
   const uint64_t wk = a[WKING], bk = a[BKING];
-  const uint64_t minors = a[WKNIGHT] | a[WBISHOP] | a[BKNIGHT] | a[BBISHOP];
   const uint64_t majors = a[WROOK] | a[WQUEEN] | a[BROOK] | a[BQUEEN];
 
   e->pawn = &pawn_corr[stm][key2(a[WPAWN], a[BPAWN]) & (CORR_SIZE - 1)];
-  e->minor = &minor_corr[stm][key2(minors & pos->colour[WHITE], minors & pos->colour[BLACK]) & (CORR_SIZE - 1)];
   e->major = &major_corr[stm][key2(majors & pos->colour[WHITE], majors & pos->colour[BLACK]) & (CORR_SIZE - 1)];
   e->nonpawn[WHITE] = &nonpawn_corr[stm][WHITE][mix64((pos->colour[WHITE] & ~a[WPAWN]) ^ wk) & (CORR_SIZE - 1)];
   e->nonpawn[BLACK] = &nonpawn_corr[stm][BLACK][mix64((pos->colour[BLACK] & ~a[BPAWN]) ^ bk) & (CORR_SIZE - 1)];
@@ -74,7 +69,6 @@ int correct_eval(const Node *node, const int ev) {
 
   // weights out of 256
   const int weighted = corr_pawn * *e.pawn
-                     + corr_minor * *e.minor
                      + corr_major * *e.major
                      + corr_nonpawn * (*e.nonpawn[WHITE] + *e.nonpawn[BLACK])
                      + (e.cont ? corr_cont * *e.cont : 0);
@@ -113,7 +107,6 @@ void update_corrhist(const Node *node, const int depth, const int diff) {
   const int w = depth + 1 < CORR_WEIGHT_MAX ? depth + 1 : CORR_WEIGHT_MAX;
 
   update_entry(e.pawn, w, diff);
-  update_entry(e.minor, w, diff);
   update_entry(e.major, w, diff);
   update_entry(e.nonpawn[WHITE], w, diff);
   update_entry(e.nonpawn[BLACK], w, diff);
