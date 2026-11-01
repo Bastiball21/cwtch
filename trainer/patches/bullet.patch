@@ -1,0 +1,13 @@
+diff --git a/crates/gpu/src/runtime.rs b/crates/gpu/src/runtime.rs
+index ac6206b..d2710c6 100644
+--- a/crates/gpu/src/runtime.rs
++++ b/crates/gpu/src/runtime.rs
+@@ -293,7 +293,7 @@ impl<G: Gpu> Module<G> {
+ 
+         let mut options = Vec::new();
+         if let Some(arch) = device.props().arch() {
+-            let s = format!("--gpu-architecture={arch}");
++            let s = format!("--gpu-architecture=compute_86");
+             options.push(CString::new(s).unwrap())
+         }
+ 

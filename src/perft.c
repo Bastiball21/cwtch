@@ -140,7 +140,7 @@ void perft_tests(int max_depth) {
   if (max_depth > 0)
     printf("Running perft tests with depth <= %d...\n\n", max_depth);
   else
-    printf("Running %lu perft tests...\n\n", (unsigned long)NUM_PERFT_TESTS);
+    printf("Running %llu perft tests...\n\n", (unsigned long long)(unsigned long)NUM_PERFT_TESTS);
 
   for (size_t i = 0; i < NUM_PERFT_TESTS; i++) {
 
@@ -156,12 +156,12 @@ void perft_tests(int max_depth) {
     uint64_t result = perft(test->depth, 0);
 
     if (result != test->nodes) {
-      printf("FAIL %s: depth %d, expected %lu, got %lu\n", test->name, test->depth, test->nodes, result);
+      printf("FAIL %s: depth %d, expected %llu, got %llu\n", test->name, test->depth, (unsigned long long)test->nodes, (unsigned long long)result);
       printf("     %s %s %s %s\n\n", test->board, test->stm, test->rights, test->ep);
       errors++;
     }
     else {
-      printf("PASS %s: depth %d, nodes %lu\n", test->name, test->depth, result);
+      printf("PASS %s: depth %d, nodes %llu\n", test->name, test->depth, (unsigned long long)result);
     }
 
     total_nodes += result;
@@ -173,8 +173,8 @@ void perft_tests(int max_depth) {
   uint64_t nps = secs > 0 ? (uint64_t)(total_nodes / secs) : 0;
 
   printf("\n");
-  printf("Total: %lu nodes in %.3fs\n", total_nodes, secs);
-  printf("NPS: %lu\n", nps);
+  printf("Total: %llu nodes in %.3fs\n", (unsigned long long)total_nodes, secs);
+  printf("NPS: %llu\n", (unsigned long long)nps);
   printf("Errors: %d/%d\n", errors, tests_run);
 
 }

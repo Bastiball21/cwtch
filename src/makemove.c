@@ -124,7 +124,7 @@ void make_move(Node *node, const move_t move) {
       all[rook_piece] ^= (1ULL << r_to);
       colour[stm] ^= ((1ULL << k_to) | (1ULL << r_to));
 
-      hash ^= zob_pieces[king_piece][from] ^ zob_pieces[king_piece][k_to] 
+      hash ^= zob_pieces[king_piece][k_to] 
             ^ zob_pieces[rook_piece][to] ^ zob_pieces[rook_piece][r_to];
 
       node->net_deferred.type = NET_OP_CASTLE;
@@ -187,33 +187,68 @@ void make_move(Node *node, const move_t move) {
 
 }
 
-void play_move(Node *node, char *uci_move) {
+void apply_move(Node *node, const move_t move) {
+  make_move(node, move);
+  int16_t scratch[2][NET_H1_SIZE];
+  memcpy(scratch, node->accs, sizeof scratch);
+  update_accs(node, scratch);
+}
+
+int play_move(Node *node, const char *uci_move) {
 
   char buf[6];
 
   Position *pos = &node->pos;
   const int stm = pos->stm;
   const int opp = stm ^ 1;
-  const int stm_king_sq = piece_index(KING, stm);
-  const int in_check = is_attacked(pos, bsf(pos->all[stm_king_sq]), opp);
-  move_t move ;
+  const int stm_king_idx = piece_index(KING, stm);
+  const int in_check = is_attacked(pos, bsf(pos->all[stm_king_idx]), opp);
+  move_t move;
+  Node scratch;
 
   init_next_search_move(node, in_check, 0);
 
   while ((move = get_next_search_move(node))) {
 
     format_move(move, buf);
-    if (!strcmp(uci_move, buf)) {
-      make_move(node, move);
-      // scratch source so update_accs() src/dest don't alias
-      int16_t scratch[2][NET_H1_SIZE];
-      memcpy(scratch, node->accs, sizeof scratch);
-      update_accs(node, scratch);
-      return;
-    }
+
+    if (strcmp(uci_move, buf) != 0)
+      continue;
+
+    pos_copy(pos, &scratch.pos);
+    make_move(&scratch, move);
+
+    if (is_attacked(&scratch.pos, bsf(scratch.pos.all[stm_king_idx]), opp))
+      return 0;
+
+    apply_move(node, move);
+    return 1;
+
   }
 
-  return;
+  return 0;
+
+}
+
+move_t first_legal_move(Node *node) {
+
+  const Position *pos = &node->pos;
+  const int stm = pos->stm;
+  const int opp = stm ^ 1;
+  const int king_idx = piece_index(KING, stm);
+  Node scratch;
+  move_t move;
+
+  init_next_search_move(node, is_attacked(pos, bsf(pos->all[king_idx]), opp), 0);
+
+  while ((move = get_next_search_move(node))) {
+    pos_copy(pos, &scratch.pos);
+    make_move(&scratch, move);
+    if (!is_attacked(&scratch.pos, bsf(scratch.pos.all[king_idx]), opp))
+      return move;
+  }
+
+  return 0;
 
 }
 

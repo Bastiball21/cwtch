@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>
 #include "uci.h"
 #include "bitboard.h"
 #include "nodes.h"
@@ -11,8 +12,7 @@
 #include "see.h"
 #include "input.h"
 #include "position.h"
-
-#define INPUT_BUFFER_SIZE 8192
+#include "datagen.h"
 
 int main(int argc, char *argv[]) {
 
@@ -20,25 +20,26 @@ int main(int argc, char *argv[]) {
   setbuf(stdout, NULL);
 
   init_attacks();
-  init_weights();
+  if (init_weights() != 0)
+    return 1;
   init_zob();
   init_lmr();
   init_line_masks();
 
   position(&nodes[0], "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR", "w", "KQkq", "-", 0, 0, NULL);
 
-  // If command-line arguments provided, execute them and exit
+  // If command-line arguments provided, execute them as a single command and exit
   if (argc > 1) {
-    for (int i = 1; i < argc; i++) {
-      if (!uci_exec(argv[i])) {
-        break;
-      }
-    }
+    static char cmd[INPUT_BUF_SIZE];
+    size_t used = 0;
+    for (int i = 1; i < argc && used < sizeof(cmd); i++)
+      used += (size_t)snprintf(cmd + used, sizeof(cmd) - used, "%s%s", i > 1 ? " " : "", argv[i]);
+    uci_exec(cmd);
     return 0;
   }
 
   // Otherwise run interactive loop
-  char input[INPUT_BUFFER_SIZE];
+  static char input[INPUT_BUF_SIZE];
 
   input_init();
 
@@ -49,5 +50,4 @@ int main(int argc, char *argv[]) {
   }
 
   _Exit(0);
-
 }

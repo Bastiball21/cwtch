@@ -83,7 +83,7 @@ void bench (int depth) {
 
     new_game();
     position(&nodes[0], b->fen, b->stm, b->rights, b->ep, 0, 0, NULL);
-    init_tc(0, 0, 0, 0, 0, 0, depth, 0);
+    init_tc(0, 0, 0, 0, 0, 0, depth, 0, 0);
     go(1);
 
     total_nodes += time_control.nodes;

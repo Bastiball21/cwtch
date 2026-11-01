@@ -5,7 +5,7 @@
 #include "pos.h"
 #include "move.h"
 
-#define MAX_PLY 64
+#define MAX_PLY 128
 #define MAX_MOVES 256
 
 enum {
@@ -30,9 +30,13 @@ typedef struct {
   uint8_t accs_dirty;
   move_t moves[MAX_MOVES];
   move_t played[MAX_MOVES];
+  move_t bad_noisy[MAX_MOVES];  // losing captures and underpromotions, tried last
   int num_moves;
   int32_t ranks[MAX_MOVES];
   int next_move;
+  int num_bad;
+  int next_bad;
+  int skip_quiets;
   int in_check;
   move_t tt_move;
   move_t excluded_move;  // se verification
@@ -40,9 +44,14 @@ typedef struct {
   int stage;
   int16_t ev;  // static eval
   move_t killer;
-  int16_t (*cont_entry)[64];  // NULL at root and after null move
+  move_t killer2;
+  move_t prev_move;   // the move that led to this node, 0 at the root and after a null move
+  int cutoffs;        // beta cutoffs among this node's siblings so far
+  int16_t (*cont_entry)[64];  // history after the previous move; NULL at root and after null move
+  int16_t (*cont2)[64];       // ... after the move 2 plies back
+  int16_t (*cont4)[64];       // ... after the move 4 plies back
 
-  /* Countermove tracking tracking fields */
+  // move that led to this node, for the countermove table
   int prev_piece;
   int prev_to;
 

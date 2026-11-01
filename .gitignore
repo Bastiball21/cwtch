@@ -1,6 +1,30 @@
 build/
+build-win/
+build-arm/
+build-arm64/
+cwtch
+cwtch.exe
 cwtch_base
 cwtch_test
+cwtch_datagen
+cwtch_512_old
 sprt.pgn
 *.epd
 releases/
+OG-net/
+bin/fastchess
+trainer/target/
+trainer/nets*/
+*.zip
+*:Zone.Identifier
+-.d
+src/types_512.h
+src/types_4096.h
+
+# match output and fastchess state
+*.pgn
+config.json
+
+# trainer leftovers
+trainer/*.deb
+trainer/Cargo.toml.bak

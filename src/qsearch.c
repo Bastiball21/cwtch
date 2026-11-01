@@ -13,11 +13,12 @@
 #include "tt.h"
 #include "corrhist.h"
 #include "see.h"
-#include "debug.h"
 #include "pv.h"
+#include "search.h"
+#include "tune.h"
 #include <stdatomic.h>
 
-_Thread_local int qsearch_local_node_batch = 0;
+#define QS_QUIET_EVASIONS 3
 
 int qsearch(const int ply, int alpha, const int beta) {
 
@@ -25,68 +26,110 @@ int qsearch(const int ply, int alpha, const int beta) {
   pv_len[ply] = 0;
   const Position *pos = &node->pos;
 
-  //debug_verify(1, node, ply);
-
   if (ply >= MAX_PLY-1) {
     lazy_update_accs(node);
     return net_eval(node);
   }
 
-  //if (is_mat_draw(pos))
-    //return 0;
-
   const int stm = pos->stm;
   const int opp = stm ^ 1;
   const int stm_king_idx = piece_index(KING, stm);
-  const int in_check = 0; //is_attacked(pos, bsf(pos->all[stm_king_idx]), opp); // for minor move gen captures optimisation only
-
-  lazy_update_accs(node);
-  int stand_pat = correct_eval(pos, net_eval(node));
-
-  if (stand_pat >= beta) {
-    return stand_pat;
-  }
-  if (stand_pat > alpha) {
-    alpha = stand_pat;
-  }
+  const int in_check = is_attacked(pos, bsf(pos->all[stm_king_idx]), opp);
+  const int is_pv = beta - alpha != 1;
 
   TimeControl *tc = &time_control;
-  qsearch_local_node_batch++;
+  count_node(ply);
 
-if (qsearch_local_node_batch >= 1024) {
-    atomic_fetch_add_explicit(&time_control.nodes, 1024, memory_order_relaxed);
-    qsearch_local_node_batch = 0;
-    
-    check_tc_nodes(); // Or check_time() / whatever function Cwtch uses
-}
+  TTHit tte;
+  const int tt_hit = tt_probe(pos->hash, &tte);
+  const int tt_score = tt_hit ? get_adjusted_score(ply, tte.score) : 0;
 
-  const TT *entry = tt_get(pos);
-  if (entry) {
-    const int tt_flags = entry->flags;
-    const int tt_score = get_adjusted_score(ply, entry->score);
-    if (tt_flags == TT_EXACT || (tt_flags == TT_BETA && tt_score >= beta) || (tt_flags == TT_ALPHA && tt_score <= alpha)) {
-      return tt_score;
-    }
+  if (!is_pv && tt_hit && (tte.bound & (tt_score >= beta ? TT_BETA : TT_ALPHA))) {
+    return tt_score;
   }
 
-  const move_t tt_move = entry && (entry->move & MOVE_FLAG_CAPTURE) ? entry->move : 0;
+  int raw_ev = TT_NO_EVAL;
+  int stand_pat = 0;
+  int best_score = -MATE + ply;
+
+  if (!in_check) {
+
+    if (tt_hit && tte.eval != TT_NO_EVAL) {
+      raw_ev = tte.eval;
+    }
+    else {
+      lazy_update_accs(node);
+      raw_ev = net_eval(node);
+    }
+    stand_pat = correct_eval(node, raw_ev);
+
+    // a stored search result is a better guess than the static eval when it
+    // bounds the eval from the right side
+    if (tt_hit && tt_score > -MATEISH && tt_score < MATEISH &&
+        (tte.bound & (tt_score > stand_pat ? TT_BETA : TT_ALPHA))) {
+      stand_pat = tt_score;
+    }
+
+    if (stand_pat >= beta) {
+      if (!tt_hit)
+        tt_put(pos->hash, TT_BETA, 0, put_adjusted_score(ply, stand_pat), raw_ev, 0, 0);
+      return stand_pat;
+    }
+
+    if (stand_pat > alpha)
+      alpha = stand_pat;
+
+    best_score = stand_pat;
+
+  }
+
+  const int orig_alpha = alpha;
+
+  // out of check only captures and queen promotions are searched here
+  move_t tt_move = tt_hit ? tte.move : 0;
+  if (!in_check && (!(tt_move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE)) ||
+                    ((tt_move & MOVE_FLAG_PROMOTE) && ((tt_move >> 12) & 7) != QUEEN)))
+    tt_move = 0;
+
   Node *next_node = &nodes[ply + 1];
   Position *next_pos = &next_node->pos;
+  const uint64_t *next_stm_king_ptr = &next_pos->all[stm_king_idx];
   move_t move;
   move_t best_move = 0;
-  int score;
-  int best_score = stand_pat;
-  //int played = 0;
-  const int orig_alpha = alpha;
-  const uint64_t *next_stm_king_ptr = &next_pos->all[stm_king_idx];
-  
+  int played = 0;
+  int quiet_evasions = 0;
+
+  // razoring calls this on a node that carries on searching, so these must stay
+  // what search() set them to
+  node->cont2 = ply >= 1 ? nodes[ply-1].cont_entry : NULL;
+  node->cont4 = ply >= 3 ? nodes[ply-3].cont_entry : NULL;
+
+  lazy_update_accs(node);  // children update from this node's accumulators
+
   init_next_qsearch_move(node, in_check, tt_move);
 
   while ((move = get_next_qsearch_move(node))) {
 
-    //if (!see_ge(pos, move, 0)) {
-      //continue;
-    //}
+    const int is_quiet = !(move & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTE));
+
+    if (best_score > -MATEISH) {
+
+      if (is_quiet && quiet_evasions >= QS_QUIET_EVASIONS)
+        continue;
+
+      if (!in_check && !(move & (MOVE_FLAG_PROMOTE | MOVE_FLAG_EPCAPTURE))) {
+        const int gain = stand_pat + see_values[pos->board[move & 0x3F]] + qs_delta;
+        if (gain <= alpha) {
+          if (gain > best_score)
+            best_score = gain;
+          continue;
+        }
+      }
+
+      if (!see_ge(pos, move, 0))
+        continue;
+
+    }
 
     pos_copy(pos, next_pos);
     make_move(next_node, move);
@@ -95,28 +138,36 @@ if (qsearch_local_node_batch >= 1024) {
       continue;
 
     next_node->accs_dirty = 1;
+    next_node->cont_entry = NULL;
+    next_node->prev_piece = EMPTY;
+    next_node->prev_move = 0;
+    played++;
+    if (is_quiet)
+      quiet_evasions++;
 
-    //played++;
-
-    score = -qsearch(ply+1, -beta, -alpha);
+    const int score = -qsearch(ply+1, -beta, -alpha);
 
     if (tc->finished)
       return 0;
 
     if (score > best_score) {
       best_score = score;
-      best_move = move;
       if (score > alpha) {
+        best_move = move;
         alpha = score;
         if (score >= beta) {
-          tt_put(pos, TT_BETA, 0, put_adjusted_score(ply, best_score), best_move); 
+          tt_put(pos->hash, TT_BETA, 0, put_adjusted_score(ply, best_score), raw_ev, best_move, 0);
           return score;
         }
       }
     }
+
   }
 
-  tt_put(pos, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, 0, put_adjusted_score(ply, best_score), best_move); 
+  if (in_check && !played)
+    return -MATE + ply;
+
+  tt_put(pos->hash, (alpha > orig_alpha) ? TT_EXACT : TT_ALPHA, 0, put_adjusted_score(ply, best_score), raw_ev, best_move, 0);
 
   return best_score;
 

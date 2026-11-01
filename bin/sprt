@@ -10,30 +10,36 @@ rm -f sprt.pgn
 
 e1=./cwtch_test
 e2=./cwtch_base
+[ -x "$e1" ] || { echo "missing $e1"; exit 1; }
+[ -x "$e2" ] || { echo "missing $e2"; exit 1; }
 
 elo0=0
 elo1=10
 concurrency=15
-book=UHO_Lichess_4852_v1.epd
+# keep this small: a large margin hides engines overrunning their clock
+margin=${MARGIN:-50}
+book=books/UHO_Lichess_4852_v1.epd
+[ -f "$book" ] || book=UHO_Lichess_4852_v1.epd
 
-if [ "$1" = "ltc" ]; then
+if [ "${1:-stc}" = "ltc" ]; then
   hash=256
-  tc=40+0.4
-  shift
+  tc=60+0.6
 else
   hash=16
   tc=8+0.08
-  [ "$1" = "stc" ] && shift
 fi
 
 e1name="Cwtch_Test"
 e2name="Cwtch_Base"
 
-~/fastchess/fastchess -recover -concurrency $concurrency -rounds 10000 -repeat \
--resign movecount=5 score=600 \
--draw movenumber=40 movecount=8 score=5 \
--engine cmd=$e1 proto=uci tc=$tc timemargin=250 option.Hash=$hash name=$e1name \
--engine cmd=$e2 proto=uci tc=$tc timemargin=250 option.Hash=$hash name=$e2name \
--openings file=./$book format=epd order=random -srand $RANDOM \
--sprt elo0=$elo0 elo1=$elo1 alpha=0.05 beta=0.1 \
--pgnout file=sprt.pgn
+FASTCHESS="./bin/fastchess"
+[ -x "$FASTCHESS" ] || FASTCHESS="$HOME/fastchess/fastchess"
+
+"$FASTCHESS" -recover -concurrency $concurrency -rounds 10000 \
+  -resign movecount=5 score=600 \
+  -draw movenumber=40 movecount=8 score=5 \
+  -engine cmd=$e1 proto=uci tc=$tc timemargin=$margin option.Hash=$hash name=$e1name \
+  -engine cmd=$e2 proto=uci tc=$tc timemargin=$margin option.Hash=$hash name=$e2name \
+  -openings file=./$book format=epd order=random -srand $RANDOM \
+  -sprt elo0=$elo0 elo1=$elo1 alpha=0.05 beta=0.1 \
+  -pgnout file=sprt.pgn

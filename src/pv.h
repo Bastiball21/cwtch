@@ -7,7 +7,7 @@
 extern _Thread_local move_t pv_table[MAX_PLY][MAX_PLY];
 extern _Thread_local int pv_len[MAX_PLY];
 
-inline void collect_pv(const int ply, const move_t move) {
+static inline void collect_pv(const int ply, const move_t move) {
 
   const int next_ply = ply + 1;
 

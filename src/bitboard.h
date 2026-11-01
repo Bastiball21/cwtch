@@ -22,7 +22,7 @@ extern uint64_t king_attacks[64];
 extern uint64_t all_attacks[64];
 extern uint64_t all_attacks_inc_edge[64];
 
-inline int magic_index(const uint64_t blockers, const uint64_t magic, const int shift) {
+static inline int magic_index(const uint64_t blockers, const uint64_t magic, const int shift) {
   return (int)((blockers * magic) >> shift);
 }
 
